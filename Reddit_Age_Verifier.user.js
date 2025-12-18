@@ -258,11 +258,11 @@ GM_addStyle(`
         background-color: #cc3700;
     }
 
-    .age-chip.confirmed.active {
+    .age-chip.posted.active {
         background-color: #2d8a44;
     }
 
-    .age-chip.confirmed.active:hover {
+    .age-chip.posted.active:hover {
         background-color: #237035;
     }
 
@@ -405,7 +405,7 @@ GM_addStyle(`
         font-weight: bold;
     }
 
-    .highlight-age.confirmed {
+    .highlight-age.posted {
         background-color: #46d160;
         color: white;
     }
@@ -565,9 +565,9 @@ function buildAgeSearchQuery() {
 // ============================================================================
 
 function extractAgesFromText(text) {
-    if (!text) return { confirmed: [], possible: [] };
+    if (!text) return { posted: [], possible: [] };
 
-    const confirmed = new Set();
+    const posted = new Set();
     const possible = new Set();
 
     // Pattern to find ages within brackets: (18), [18], {18}, (18m), etc.
@@ -583,24 +583,24 @@ function extractAgesFromText(text) {
         /\b(\d{2})\b/g                // 18 (standalone)
     ];
 
-    // First, find all bracketed ages (confirmed)
+    // First, find all bracketed ages (posted)
     bracketPatterns.forEach(pattern => {
         let match;
         while ((match = pattern.exec(text)) !== null) {
             const age = parseInt(match[1]);
             if (age >= MIN_AGE && age <= MAX_AGE) {
-                confirmed.add(age);
+                posted.add(age);
             }
         }
     });
 
-    // Then find all ages and add to possible if not already confirmed
+    // Then find all ages and add to possible if not already posted
     standalonePatterns.forEach(pattern => {
         let match;
         while ((match = pattern.exec(text)) !== null) {
             const age = parseInt(match[1]);
             if (age >= MIN_AGE && age <= MAX_AGE) {
-                if (!confirmed.has(age)) {
+                if (!posted.has(age)) {
                     possible.add(age);
                 }
             }
@@ -608,7 +608,7 @@ function extractAgesFromText(text) {
     });
 
     return {
-        confirmed: Array.from(confirmed).sort((a, b) => a - b),
+        posted: Array.from(posted).sort((a, b) => a - b),
         possible: Array.from(possible).sort((a, b) => a - b)
     };
 }
@@ -695,7 +695,7 @@ function searchUserAges(username) {
 
 function processResults(results, username) {
     const ageData = {
-        confirmedAges: new Set(),
+        postedAges: new Set(),
         possibleAges: new Set(),
         results: []
     };
@@ -707,8 +707,8 @@ function processResults(results, username) {
 
         const foundAges = extractAgesFromText(searchText);
 
-        if (foundAges.confirmed.length > 0 || foundAges.possible.length > 0) {
-            foundAges.confirmed.forEach(age => ageData.confirmedAges.add(age));
+        if (foundAges.posted.length > 0 || foundAges.possible.length > 0) {
+            foundAges.posted.forEach(age => ageData.postedAges.add(age));
             foundAges.possible.forEach(age => ageData.possibleAges.add(age));
 
             // Create snippet from title (prioritize) or selftext
@@ -721,9 +721,9 @@ function processResults(results, username) {
             }
 
             ageData.results.push({
-                confirmedAges: foundAges.confirmed,
+                postedAges: foundAges.posted,
                 possibleAges: foundAges.possible,
-                allAges: [...foundAges.confirmed, ...foundAges.possible], // Combined for filtering
+                allAges: [...foundAges.posted, ...foundAges.possible], // Combined for filtering
                 date: new Date(post.created_utc * 1000).toLocaleDateString(),
                 subreddit: post.subreddit,
                 snippet: snippet,
@@ -735,16 +735,16 @@ function processResults(results, username) {
 
     console.log(`Found ${ageData.results.length} posts with age mentions from ${results.length} total posts`);
 
-    ageData.confirmedAges = Array.from(ageData.confirmedAges).sort((a, b) => a - b);
+    ageData.postedAges = Array.from(ageData.postedAges).sort((a, b) => a - b);
     ageData.possibleAges = Array.from(ageData.possibleAges).sort((a, b) => a - b);
     return ageData;
 }
 
-function highlightAgesInText(text, confirmedAges, possibleAges) {
+function highlightAgesInText(text, postedAges, possibleAges) {
     let highlighted = text;
 
-    // First highlight confirmed ages in green
-    confirmedAges.forEach(age => {
+    // First highlight posted ages in green
+    postedAges.forEach(age => {
         const patterns = [
             new RegExp(`\\b${age}[mM]\\b`, 'g'),
             new RegExp(`\\b[mM]${age}\\b`, 'g'),
@@ -753,7 +753,7 @@ function highlightAgesInText(text, confirmedAges, possibleAges) {
             new RegExp(`[\\(\\[\\{][mM]${age}[\\)\\]\\}]`, 'g')
         ];
         patterns.forEach(pattern => {
-            highlighted = highlighted.replace(pattern, `<span class="highlight-age confirmed">$&</span>`);
+            highlighted = highlighted.replace(pattern, `<span class="highlight-age posted">$&</span>`);
         });
     });
 
@@ -887,9 +887,9 @@ function showResultsModal(username, ageData) {
     modal.style.height = '600px';
     modal.style.zIndex = ++zIndexCounter;
 
-    const confirmedAges = ageData.confirmedAges;
+    const postedAges = ageData.postedAges;
     const possibleAges = ageData.possibleAges;
-    const allAges = [...confirmedAges, ...possibleAges];
+    const allAges = [...postedAges, ...possibleAges];
     const results = ageData.results;
 
     let summaryHTML = '';
@@ -899,15 +899,15 @@ function showResultsModal(username, ageData) {
             <p>No posts found matching age patterns (${MIN_AGE}-${MAX_AGE}).</p>
         </div>`;
     } else {
-        // Create confirmed age chips
-        let confirmedChipsHTML = '';
-        if (confirmedAges.length > 0) {
-            confirmedChipsHTML = `
+        // Create posted age chips
+        let postedChipsHTML = '';
+        if (postedAges.length > 0) {
+            postedChipsHTML = `
                 <div style="margin-top: 10px;">
-                    <strong>Confirmed Ages (in brackets):</strong>
+                    <strong>Posted Ages (in brackets):</strong>
                     <div class="age-filter-chips">
-                        ${confirmedAges.map(age =>
-                            `<span class="age-chip confirmed" data-age="${age}" data-type="confirmed">${age}</span>`
+                        ${postedAges.map(age =>
+                            `<span class="age-chip posted" data-age="${age}" data-type="posted">${age}</span>`
                         ).join('')}
                     </div>
                 </div>
@@ -929,18 +929,18 @@ function showResultsModal(username, ageData) {
             `;
         }
 
-        const minConfirmed = confirmedAges.length > 0 ? Math.min(...confirmedAges) : null;
-        const maxConfirmed = confirmedAges.length > 0 ? Math.max(...confirmedAges) : null;
-        const confirmedRangeText = minConfirmed !== null
-            ? (minConfirmed === maxConfirmed ? `${minConfirmed}` : `${minConfirmed}-${maxConfirmed}`)
+        const minPosted = postedAges.length > 0 ? Math.min(...postedAges) : null;
+        const maxPosted = postedAges.length > 0 ? Math.max(...postedAges) : null;
+        const postedRangeText = minPosted !== null
+            ? (minPosted === maxPosted ? `${minPosted}` : `${minPosted}-${maxPosted}`)
             : 'None';
 
         summaryHTML = `<div class="age-summary">
-            <div class="age-summary-title">Found Ages: ${confirmedRangeText}</div>
-            <p>Confirmed ages found: ${confirmedAges.length > 0 ? confirmedAges.join(', ') : 'None'}</p>
+            <div class="age-summary-title">Found Ages: ${postedRangeText}</div>
+            <p>Posted ages found: ${postedAges.length > 0 ? postedAges.join(', ') : 'None'}</p>
             <p>Possible ages found: ${possibleAges.length > 0 ? possibleAges.join(', ') : 'None'}</p>
             <p>Total posts with age mentions: ${results.length}</p>
-            ${confirmedChipsHTML}
+            ${postedChipsHTML}
             ${possibleChipsHTML}
         </div>`;
     }
@@ -949,9 +949,9 @@ function showResultsModal(username, ageData) {
     if (results.length > 0) {
         resultsHTML = '<div class="age-results-container">';
         results.forEach((result, index) => {
-            const highlightedSnippet = highlightAgesInText(result.snippet, result.confirmedAges, result.possibleAges);
-            const confirmedBadge = result.confirmedAges.length > 0
-                ? `<span style="color: #46d160;">✓ ${result.confirmedAges.join(', ')}</span>`
+            const highlightedSnippet = highlightAgesInText(result.snippet, result.postedAges, result.possibleAges);
+            const postedBadge = result.postedAges.length > 0
+                ? `<span style="color: #46d160;">✓ ${result.postedAges.join(', ')}</span>`
                 : '';
             const possibleBadge = result.possibleAges.length > 0
                 ? `<span style="color: #818384;">? ${result.possibleAges.join(', ')}</span>`
@@ -960,7 +960,7 @@ function showResultsModal(username, ageData) {
             resultsHTML += `
                 <div class="age-result-item" data-index="${index}" data-ages="${result.allAges.join(',')}">
                     <div class="age-result-header">
-                        <span class="age-result-age">Age: ${confirmedBadge} ${possibleBadge}</span>
+                        <span class="age-result-age">Age: ${postedBadge} ${possibleBadge}</span>
                         <span class="age-result-date">${result.date}</span>
                     </div>
                     <div class="age-result-subreddit">r/${result.subreddit}</div>
@@ -1259,14 +1259,14 @@ function createAgeCheckButton(username) {
     button.dataset.username = username;
 
     const cached = getCachedAgeData(username);
-    if (cached && cached.confirmedAges && cached.confirmedAges.length > 0) {
-        const minAge = Math.min(...cached.confirmedAges);
-        const maxAge = Math.max(...cached.confirmedAges);
+    if (cached && cached.postedAges && cached.postedAges.length > 0) {
+        const minAge = Math.min(...cached.postedAges);
+        const maxAge = Math.max(...cached.postedAges);
         const ageText = minAge === maxAge ? minAge : `${minAge}-${maxAge}`;
         button.textContent = `Age: ${ageText} - Recheck`;
         button.classList.add('cached');
     } else if (cached) {
-        button.textContent = 'No Confirmed Ages - Recheck';
+        button.textContent = 'No Posted Ages - Recheck';
         button.classList.add('cached');
     } else {
         button.textContent = 'Check Age';
@@ -1281,14 +1281,14 @@ function updateButtonForUser(username) {
     const buttons = document.querySelectorAll(`.age-check-button[data-username="${username}"]`);
     buttons.forEach(button => {
         const cached = getCachedAgeData(username);
-        if (cached && cached.confirmedAges && cached.confirmedAges.length > 0) {
-            const minAge = Math.min(...cached.confirmedAges);
-            const maxAge = Math.max(...cached.confirmedAges);
+        if (cached && cached.postedAges && cached.postedAges.length > 0) {
+            const minAge = Math.min(...cached.postedAges);
+            const maxAge = Math.max(...cached.postedAges);
             const ageText = minAge === maxAge ? minAge : `${minAge}-${maxAge}`;
             button.textContent = `Age: ${ageText} - Recheck`;
             button.classList.add('cached');
         } else if (cached) {
-            button.textContent = 'No Confirmed Ages - Recheck';
+            button.textContent = 'No Posted Ages - Recheck';
             button.classList.add('cached');
         } else {
             button.textContent = 'Check Age';
