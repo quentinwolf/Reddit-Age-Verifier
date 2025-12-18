@@ -240,6 +240,14 @@ GM_addStyle(`
         background-color: #005ba1;
     }
 
+    .age-chip.possible {
+        background-color: #818384;
+    }
+
+    .age-chip.possible:hover {
+        background-color: #6b6c6e;
+    }
+
     .age-chip.active {
         background-color: #ff4500;
     }
@@ -912,7 +920,7 @@ function showResultsModal(username, ageData) {
                     <strong>Possible Ages (not in brackets):</strong>
                     <div class="age-filter-chips">
                         ${possibleAges.map(age =>
-                            `<span class="age-chip possible" data-age="${age}" data-type="possible" style="background-color: #818384;">${age}</span>`
+                            `<span class="age-chip possible" data-age="${age}" data-type="possible">${age}</span>`
                         ).join('')}
                     </div>
                 </div>
