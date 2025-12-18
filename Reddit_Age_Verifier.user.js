@@ -20,11 +20,11 @@
 // @exclude      https://*.reddit.com/message/*
 // @exclude      https://*.reddit.com/report*
 // @exclude      https://chat.reddit.com*
-// @exclude      https://mod.reddit.com*
 // @exclude      https://developers.reddit.com*
+// @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.05
+// @version      1.06
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -1354,11 +1354,12 @@ function insertAfter(newNode, referenceNode) {
     referenceNode.parentNode.insertBefore(newNode, referenceNode.nextSibling);
 }
 
-// ============================================================================
-// MAIN LOOP
-// ============================================================================
+function extractUsernameFromUrl(url) {
+    const match = url.match(/reddit\.com\/user\/([^\/?#]+)/i);
+    return match ? decodeURIComponent(match[1].replace(/^u\//i, '')) : null;
+}
 
-function mainLoop() {
+function processOldReddit() {
     const taglines = document.getElementsByClassName('tagline');
     for (let i = 0; i < taglines.length; i++) {
         if (!hasAgeButton(taglines[i])) {
@@ -1376,14 +1377,44 @@ function mainLoop() {
     }
 }
 
+function processModReddit() {
+    const userLinks = document.querySelectorAll('a[href*="reddit.com/user/"]');
+
+    userLinks.forEach(link => {
+        if (link.dataset.ageVerifierProcessed === 'true') {
+            return;
+        }
+
+        const username = extractUsernameFromUrl(link.href);
+        if (!username) {
+            return;
+        }
+
+        if (!(username in userToButtonNode)) {
+            userToButtonNode[username] = createAgeCheckButton(username);
+        }
+
+        const button = userToButtonNode[username].cloneNode(true);
+        button.onclick = () => handleAgeCheck(username);
+
+        if (link.parentElement) {
+            insertAfter(button, link);
+            link.dataset.ageVerifierProcessed = 'true';
+        }
+    });
+}
+
 // ============================================================================
 // INITIALIZATION
 // ============================================================================
 
+const isModReddit = location.hostname.includes('mod.reddit.com');
+const activeProcessor = isModReddit ? processModReddit : processOldReddit;
+
 let debounceTimer;
 function debouncedMainLoop() {
     clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(mainLoop, 500);
+    debounceTimer = setTimeout(activeProcessor, 500);
 }
 
 // Load token on startup
@@ -1393,5 +1424,5 @@ loadToken();
 const observer = new MutationObserver(debouncedMainLoop);
 observer.observe(document.body, { childList: true, subtree: true });
 
-logDebug("Reddit Age Verifier ready");
+logDebug(`Reddit Age Verifier ready for ${isModReddit ? 'mod.reddit.com' : 'old.reddit.com'}`);
 logDebug(`Checking ages ${MIN_AGE}-${MAX_AGE} using PushShift API with exact_author=true`);
