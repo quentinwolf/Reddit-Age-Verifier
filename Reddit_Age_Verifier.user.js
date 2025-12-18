@@ -777,12 +777,16 @@ function highlightAgesInText(text, confirmedAges, possibleAges) {
 function closeModalById(modalId) {
     const modalInfo = resultsModals.find(m => m.modalId === modalId);
     if (modalInfo) {
-        try {
-            document.body.removeChild(modalInfo.overlay);
-            document.body.removeChild(modalInfo.modal);
-        } catch (e) {
-            // Modal might already be removed
+        // Remove overlay if it exists in the DOM (most modals don't add one)
+        if (modalInfo.overlay && modalInfo.overlay.parentNode) {
+            modalInfo.overlay.parentNode.removeChild(modalInfo.overlay);
         }
+
+        // Always attempt to remove the modal itself
+        if (modalInfo.modal && modalInfo.modal.parentNode) {
+            modalInfo.modal.parentNode.removeChild(modalInfo.modal);
+        }
+
         resultsModals = resultsModals.filter(m => m.modalId !== modalId);
     }
 }
