@@ -1,33 +1,35 @@
 // ==UserScript==
-// @name        Reddit Age Verifier
-// @namespace   RedditAgeVerifier
-// @description Check user ages using PushShift API to verify posting history
-// @include     http://*.reddit.com/*
-// @include     https://*.reddit.com/*
-// @exclude     https://*.reddit.com/prefs/*
-// @exclude     https://*.reddit.com/r/*/wiki/*
-// @exclude     https://*.reddit.com/r/*/about/edit/*
-// @exclude     https://*.reddit.com/r/*/about/rules/*
-// @exclude     https://*.reddit.com/r/*/about/moderators/*
-// @exclude     https://*.reddit.com/r/*/about/contributors/*
-// @exclude     https://*.reddit.com/r/*/about/scheduledposts
-// @exclude     https://*.reddit.com/mod/*/insights*
-// @exclude     https://*.reddit.com/r/*/about/banned/*
-// @exclude     https://*.reddit.com/r/*/about/muted/*
-// @exclude     https://*.reddit.com/r/*/about/flair/*
-// @exclude     https://*.reddit.com/r/*/about/log/*
-// @exclude     https://*.reddit.com/api/*
-// @exclude     https://*.reddit.com/message/*
-// @exclude     https://*.reddit.com/report*
-// @exclude     https://chat.reddit.com*
-// @exclude     https://mod.reddit.com*
-// @exclude     https://developers.reddit.com*
-// @version     1.0
-// @run-at      document-end
-// @grant       GM_xmlhttpRequest
-// @grant       GM_addStyle
-// @grant       GM_getValue
-// @grant       GM_setValue
+// @name         Reddit Age Verifier
+// @namespace    RedditAgeVerifier
+// @description  Check user ages using PushShift API to verify posting history
+// @include      http://*.reddit.com/*
+// @include      https://*.reddit.com/*
+// @exclude      https://*.reddit.com/prefs/*
+// @exclude      https://*.reddit.com/r/*/wiki/*
+// @exclude      https://*.reddit.com/r/*/about/edit/*
+// @exclude      https://*.reddit.com/r/*/about/rules/*
+// @exclude      https://*.reddit.com/r/*/about/moderators/*
+// @exclude      https://*.reddit.com/r/*/about/contributors/*
+// @exclude      https://*.reddit.com/r/*/about/scheduledposts
+// @exclude      https://*.reddit.com/mod/*/insights*
+// @exclude      https://*.reddit.com/r/*/about/banned/*
+// @exclude      https://*.reddit.com/r/*/about/muted/*
+// @exclude      https://*.reddit.com/r/*/about/flair/*
+// @exclude      https://*.reddit.com/r/*/about/log/*
+// @exclude      https://*.reddit.com/api/*
+// @exclude      https://*.reddit.com/message/*
+// @exclude      https://*.reddit.com/report*
+// @exclude      https://chat.reddit.com*
+// @exclude      https://mod.reddit.com*
+// @exclude      https://developers.reddit.com*
+// @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
+// @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
+// @version      1.0
+// @run-at       document-end
+// @grant        GM_xmlhttpRequest
+// @grant        GM_addStyle
+// @grant        GM_getValue
+// @grant        GM_setValue
 // ==/UserScript==
 
 // ============================================================================
