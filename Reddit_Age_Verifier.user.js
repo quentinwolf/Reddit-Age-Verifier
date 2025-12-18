@@ -792,6 +792,16 @@ function bringToFront(modal) {
     modal.style.zIndex = zIndexCounter;
 }
 
+function normalizeModalPosition(modal) {
+    const transform = window.getComputedStyle(modal).transform;
+    if (transform && transform !== 'none') {
+        const rect = modal.getBoundingClientRect();
+        modal.style.left = `${rect.left}px`;
+        modal.style.top = `${rect.top}px`;
+        modal.style.transform = 'none';
+    }
+}
+
 function makeDraggable(modal) {
     const header = modal.querySelector('.age-modal-header');
     let isDragging = false;
@@ -805,17 +815,13 @@ function makeDraggable(modal) {
             return; // Don't drag when clicking close button
         }
 
-        // Get current position
+        // Ensure modal uses pixel positioning before starting drag
+        normalizeModalPosition(modal);
+
+        // Get current position after potential normalization
         const rect = modal.getBoundingClientRect();
         modalStartLeft = rect.left;
         modalStartTop = rect.top;
-
-        // If modal is still centered (has transform), switch to absolute positioning
-        if (modal.style.transform !== 'none' && modal.style.transform !== '') {
-            modal.style.left = modalStartLeft + 'px';
-            modal.style.top = modalStartTop + 'px';
-            modal.style.transform = 'none';
-        }
 
         // Record starting mouse position
         startX = e.clientX;
@@ -981,12 +987,7 @@ function showResultsModal(username, ageData) {
         bringToFront(modal);
 
         // Remove transform on first interaction for proper resizing
-        if (modal.style.transform !== 'none' && modal.style.transform !== '') {
-            const rect = modal.getBoundingClientRect();
-            modal.style.left = rect.left + 'px';
-            modal.style.top = rect.top + 'px';
-            modal.style.transform = 'none';
-        }
+        normalizeModalPosition(modal);
     });
 
     // Store modal reference
@@ -1126,12 +1127,7 @@ function showErrorModal(username, error) {
         bringToFront(modal);
 
         // Remove transform on first interaction
-        if (modal.style.transform !== 'none' && modal.style.transform !== '') {
-            const rect = modal.getBoundingClientRect();
-            modal.style.left = rect.left + 'px';
-            modal.style.top = rect.top + 'px';
-            modal.style.transform = 'none';
-        }
+        normalizeModalPosition(modal);
     });
 
     resultsModals.push({ modalId, modal, overlay, username });
@@ -1179,12 +1175,7 @@ function showLoadingModal(username) {
         bringToFront(modal);
 
         // Remove transform on first interaction
-        if (modal.style.transform !== 'none' && modal.style.transform !== '') {
-            const rect = modal.getBoundingClientRect();
-            modal.style.left = rect.left + 'px';
-            modal.style.top = rect.top + 'px';
-            modal.style.transform = 'none';
-        }
+        normalizeModalPosition(modal);
     });
 
     resultsModals.push({ modalId, modal, overlay, username });
