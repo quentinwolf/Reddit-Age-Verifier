@@ -24,7 +24,7 @@
 // @exclude      https://developers.reddit.com*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.02
+// @version      1.03
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -162,6 +162,14 @@ GM_addStyle(`
         min-height: 0;
     }
 
+    .age-modal-topbar {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        background-color: #1a1a1b;
+        padding-bottom: 10px;
+    }
+
     .age-token-input {
         width: 100%;
         padding: 8px;
@@ -272,6 +280,10 @@ GM_addStyle(`
 
     .age-chip.possible.active:hover {
         background-color: #e67a32;
+    }
+
+    .age-filter-status-container {
+        margin-top: 10px;
     }
 
     .age-filter-status {
@@ -945,6 +957,13 @@ function showResultsModal(username, ageData) {
         </div>`;
     }
 
+    const topbarHTML = `
+        <div class="age-modal-topbar">
+            ${summaryHTML}
+            <div class="age-filter-status-container"></div>
+        </div>
+    `;
+
     let resultsHTML = '';
     if (results.length > 0) {
         resultsHTML = '<div class="age-results-container">';
@@ -978,7 +997,7 @@ function showResultsModal(username, ageData) {
             <button class="age-modal-close">&times;</button>
         </div>
         <div class="age-modal-content">
-            ${summaryHTML}
+            ${topbarHTML}
             ${resultsHTML}
         </div>
         <div class="age-modal-buttons">
@@ -1014,6 +1033,7 @@ function showResultsModal(username, ageData) {
     const clearAllBtn = modal.querySelector('.clear-all');
     const ageChips = modal.querySelectorAll('.age-chip');
     const resultItems = modal.querySelectorAll('.age-result-item');
+    const filterStatusContainer = modal.querySelector('.age-filter-status-container');
 
     let activeFilter = null;
 
@@ -1064,8 +1084,9 @@ function showResultsModal(username, ageData) {
                 chip.classList.remove('active');
                 resultItems.forEach(item => item.classList.remove('hidden'));
                 // Remove filter status if exists
-                const filterStatus = modal.querySelector('.age-filter-status');
-                if (filterStatus) filterStatus.remove();
+                if (filterStatusContainer) {
+                    filterStatusContainer.innerHTML = '';
+                }
             } else {
                 // Apply filter
                 activeFilter = filterAge;
@@ -1085,21 +1106,22 @@ function showResultsModal(username, ageData) {
                 });
 
                 // Add/update filter status message
-                let filterStatus = modal.querySelector('.age-filter-status');
-                if (!filterStatus) {
-                    filterStatus = document.createElement('div');
-                    filterStatus.className = 'age-filter-status';
-                    const resultsContainer = modal.querySelector('.age-results-container');
-                    resultsContainer.parentNode.insertBefore(filterStatus, resultsContainer);
+                if (filterStatusContainer) {
+                    let filterStatus = filterStatusContainer.querySelector('.age-filter-status');
+                    if (!filterStatus) {
+                        filterStatus = document.createElement('div');
+                        filterStatus.className = 'age-filter-status';
+                        filterStatusContainer.appendChild(filterStatus);
+                    }
+                    const visibleCount = Array.from(resultItems).filter(item => !item.classList.contains('hidden')).length;
+                    filterStatus.textContent = `Showing ${visibleCount} posts with age ${filterAge}. Click to clear filter.`;
+                    filterStatus.onclick = () => {
+                        activeFilter = null;
+                        ageChips.forEach(c => c.classList.remove('active'));
+                        resultItems.forEach(item => item.classList.remove('hidden'));
+                        filterStatusContainer.innerHTML = '';
+                    };
                 }
-                const visibleCount = Array.from(resultItems).filter(item => !item.classList.contains('hidden')).length;
-                filterStatus.textContent = `Showing ${visibleCount} posts with age ${filterAge}. Click to clear filter.`;
-                filterStatus.onclick = () => {
-                    activeFilter = null;
-                    ageChips.forEach(c => c.classList.remove('active'));
-                    resultItems.forEach(item => item.classList.remove('hidden'));
-                    filterStatus.remove();
-                };
             }
         });
     });
