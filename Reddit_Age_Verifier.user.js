@@ -24,7 +24,7 @@
 // @exclude      https://developers.reddit.com*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.03
+// @version      1.04
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -35,6 +35,9 @@
 // ============================================================================
 // CONFIGURATION
 // ============================================================================
+
+// Debug Mode
+const debugMode = true; // Set to 'true' for console logs
 
 // Search configuration
 const MIN_AGE = 10;                // Minimum age to search for
@@ -428,6 +431,13 @@ GM_addStyle(`
     }
 `);
 
+// Debug Function to log messages to console if enabled at top of script
+function logDebug(...args) {
+    if (debugMode) {
+        console.log('[Age Verifier]', ...args);
+    }
+}
+
 // ============================================================================
 // TOKEN MANAGEMENT
 // ============================================================================
@@ -436,7 +446,7 @@ function loadToken() {
     const tokenData = JSON.parse(localStorage.getItem('pushShiftToken') || 'null');
     if (tokenData && Date.now() - tokenData.timestamp < TOKEN_EXPIRATION) {
         apiToken = tokenData.token;
-        console.log("Age Verifier: Using cached token");
+        logDebug("Age Verifier: Using cached token");
         return true;
     }
     return false;
@@ -458,7 +468,7 @@ function clearToken() {
 function attemptAutoFetchToken() {
     // Auto-fetch is not reliable due to CORS and redirect handling
     // Users need to manually visit the auth URL and paste the token
-    console.log("Age Verifier: Auto-fetch not supported, showing manual token entry");
+    logDebug("Age Verifier: Auto-fetch not supported, showing manual token entry");
     return false;
 }
 
@@ -648,7 +658,7 @@ function searchUserAges(username) {
 
         const url = `${PUSHSHIFT_API_BASE}/reddit/search/submission/?${params}`;
 
-        console.log('PushShift request for user:', username, 'with exact_author=true');
+        logDebug('PushShift request for user:', username, 'with exact_author=true');
 
         GM_xmlhttpRequest({
             method: 'GET',
@@ -685,7 +695,7 @@ function searchUserAges(username) {
                 try {
                     const data = JSON.parse(response.responseText);
                     const results = data.data || [];
-                    console.log(`PushShift returned ${results.length} results for ${username}`);
+                    logDebug(`PushShift returned ${results.length} results for ${username}`);
                     resolve(results);
                 } catch (error) {
                     reject(new Error('Failed to parse API response'));
@@ -745,7 +755,7 @@ function processResults(results, username) {
         }
     });
 
-    console.log(`Found ${ageData.results.length} posts with age mentions from ${results.length} total posts`);
+    logDebug(`Found ${ageData.results.length} posts with age mentions from ${results.length} total posts`);
 
     ageData.postedAges = Array.from(ageData.postedAges).sort((a, b) => a - b);
     ageData.possibleAges = Array.from(ageData.possibleAges).sort((a, b) => a - b);
@@ -1366,5 +1376,5 @@ loadToken();
 const observer = new MutationObserver(debouncedMainLoop);
 observer.observe(document.body, { childList: true, subtree: true });
 
-console.log("Reddit Age Verifier ready");
-console.log(`Checking ages ${MIN_AGE}-${MAX_AGE} using PushShift API with exact_author=true`);
+logDebug("Reddit Age Verifier ready");
+logDebug(`Checking ages ${MIN_AGE}-${MAX_AGE} using PushShift API with exact_author=true`);
