@@ -24,7 +24,7 @@
 // @exclude      https://developers.reddit.com*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.04
+// @version      1.05
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -126,13 +126,21 @@ GM_addStyle(`
 
     .age-modal-header {
         display: flex;
-        justify-content: space-between;
-        align-items: center;
+        flex-direction: column;
+        gap: 12px;
         padding: 15px 20px;
         border-bottom: 1px solid #343536;
-        cursor: move;  /* Indicate draggable */
         user-select: none;
         flex-shrink: 0;
+    }
+
+    .age-modal-title-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        width: 100%;
+        gap: 12px;
+        cursor: move;  /* Drag handle */
     }
 
     .age-modal-title {
@@ -166,11 +174,12 @@ GM_addStyle(`
     }
 
     .age-modal-topbar {
-        position: sticky;
-        top: 0;
-        z-index: 2;
-        background-color: #1a1a1b;
-        padding-bottom: 10px;
+        width: 100%;
+        background-color: #1f1f21;
+        border: 1px solid #343536;
+        border-radius: 6px;
+        padding: 12px 14px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
     }
 
     .age-token-input {
@@ -839,12 +848,12 @@ function normalizeModalPosition(modal) {
 }
 
 function makeDraggable(modal) {
-    const header = modal.querySelector('.age-modal-header');
+    const dragHandle = modal.querySelector('.age-modal-title-row') || modal.querySelector('.age-modal-header');
     let isDragging = false;
     let startX, startY;
     let modalStartLeft, modalStartTop;
 
-    header.addEventListener('mousedown', dragStart);
+    dragHandle.addEventListener('mousedown', dragStart);
 
     function dragStart(e) {
         if (e.target.classList.contains('age-modal-close')) {
@@ -1003,11 +1012,13 @@ function showResultsModal(username, ageData) {
 
     modal.innerHTML = `
         <div class="age-modal-header">
-            <div class="age-modal-title">Age Verification: u/${username}</div>
-            <button class="age-modal-close">&times;</button>
+            <div class="age-modal-title-row">
+                <div class="age-modal-title">Age Verification: u/${username}</div>
+                <button class="age-modal-close">&times;</button>
+            </div>
+            ${topbarHTML}
         </div>
         <div class="age-modal-content">
-            ${topbarHTML}
             ${resultsHTML}
         </div>
         <div class="age-modal-buttons">
@@ -1044,6 +1055,7 @@ function showResultsModal(username, ageData) {
     const ageChips = modal.querySelectorAll('.age-chip');
     const resultItems = modal.querySelectorAll('.age-result-item');
     const filterStatusContainer = modal.querySelector('.age-filter-status-container');
+    const contentContainer = modal.querySelector('.age-modal-content');
 
     let activeFilter = null;
 
@@ -1087,6 +1099,7 @@ function showResultsModal(username, ageData) {
     ageChips.forEach(chip => {
         chip.addEventListener('click', () => {
             const filterAge = parseInt(chip.dataset.age);
+            const isSwitchingFilter = activeFilter !== null && activeFilter !== filterAge;
 
             if (activeFilter === filterAge) {
                 // Clear filter
@@ -1131,6 +1144,10 @@ function showResultsModal(username, ageData) {
                         resultItems.forEach(item => item.classList.remove('hidden'));
                         filterStatusContainer.innerHTML = '';
                     };
+                }
+
+                if (isSwitchingFilter && contentContainer) {
+                    contentContainer.scrollTo({ top: 0, behavior: 'smooth' });
                 }
             }
         });
