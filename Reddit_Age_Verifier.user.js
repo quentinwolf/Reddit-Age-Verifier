@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.09
+// @version      1.10
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -808,6 +808,151 @@ function estimateCurrentAge(ageData) {
     // Sort by timestamp
     dataPoints.sort((a, b) => a.timestamp - b.timestamp);
 
+    // Detect anomalies (suspicious age jumps)
+    const anomalies = [];
+    let hasMajorJump = false;
+
+    for (let i = 1; i < dataPoints.length; i++) {
+        const timeDiff = (dataPoints[i].timestamp - dataPoints[i-1].timestamp) / (365.25 * 24 * 60 * 60);
+        const ageDiff = dataPoints[i].age - dataPoints[i-1].age;
+
+        // Flag if aging faster than 2 years per calendar year, or aging backwards
+        if (timeDiff > 0) {
+            const ageRate = ageDiff / timeDiff;
+            if (ageRate > 2 || ageRate < -0.5) {
+                anomalies.push({
+                    index: i,
+                    fromAge: dataPoints[i-1].age,
+                    toAge: dataPoints[i].age,
+                    years: timeDiff,
+                    rate: ageRate
+                });
+
+                // Major jump: >5 years in <2 calendar years
+                if (Math.abs(ageDiff) >= 5 && timeDiff < 2) {
+                    hasMajorJump = true;
+                }
+
+                logDebug(`Anomaly detected: ${dataPoints[i-1].age} -> ${dataPoints[i].age} in ${timeDiff.toFixed(2)} years (rate: ${ageRate.toFixed(2)})`);
+            }
+        }
+    }
+
+    // If there's a major jump, this is likely falsified data, not a couples account
+    if (hasMajorJump) {
+        logDebug('Major age jump detected - likely falsified data');
+
+        // If most data is after the jump, skip estimation entirely but return anomaly info
+        if (anomalies.length > 0 && anomalies[0].index < dataPoints.length / 2) {
+            logDebug('Jump is early in timeline, skipping estimation');
+            return {
+                skipped: true,
+                reason: 'major_jump',
+                anomalies: anomalies,
+                message: `Major age jump detected (${anomalies[0].fromAge} → ${anomalies[0].toAge} in ${anomalies[0].years.toFixed(1)} years). Unable to estimate current age.`
+            };
+        }
+    }
+
+    // If more than 30% of transitions are anomalies, skip estimation
+    if (dataPoints.length > 1 && anomalies.length / (dataPoints.length - 1) > 0.3) {
+        logDebug('Too many anomalies detected, skipping estimation');
+        return {
+            skipped: true,
+            reason: 'too_many_anomalies',
+            anomalies: anomalies,
+            message: `Too many age inconsistencies detected (${anomalies.length} anomalies in ${dataPoints.length} points). Unable to estimate current age.`
+        };
+    }
+
+    // Try to detect couples account (two distinct age tracks that ALTERNATE)
+    let isCouplesAccount = false;
+    if (dataPoints.length >= 6 && anomalies.length > 0 && !hasMajorJump) {
+        // Group ages into clusters (within 4 years of each other)
+        const clusters = [];
+        dataPoints.forEach((point, idx) => {
+            let foundCluster = false;
+            for (let cluster of clusters) {
+                const avgAge = cluster.reduce((sum, p) => sum + p.age, 0) / cluster.length;
+                if (Math.abs(avgAge - point.age) <= 4) {
+                    cluster.push({...point, originalIndex: idx});
+                    foundCluster = true;
+                    break;
+                }
+            }
+            if (!foundCluster) {
+                clusters.push([{...point, originalIndex: idx}]);
+            }
+        });
+
+        // If we have exactly 2 clusters with reasonable sizes
+        if (clusters.length === 2 && clusters[0].length >= 3 && clusters[1].length >= 3) {
+            // Check if ages alternate (not clustered temporally)
+            const cluster1Indices = clusters[0].map(p => p.originalIndex).sort((a, b) => a - b);
+            const cluster2Indices = clusters[1].map(p => p.originalIndex).sort((a, b) => a - b);
+
+            // Calculate how interleaved they are
+            let interleaveScore = 0;
+            for (let i = 0; i < dataPoints.length - 1; i++) {
+                const isInCluster1 = cluster1Indices.includes(i);
+                const nextIsInCluster1 = cluster1Indices.includes(i + 1);
+
+                // Award points for alternation
+                if (isInCluster1 !== nextIsInCluster1) {
+                    interleaveScore++;
+                }
+            }
+
+            const interleaveRatio = interleaveScore / (dataPoints.length - 1);
+
+            // If ages alternate at least 40% of the time, likely couples account
+            if (interleaveRatio >= 0.4) {
+                logDebug(`Couples account detected - interleave ratio: ${interleaveRatio.toFixed(2)}`);
+                isCouplesAccount = true;
+
+                // Use the track with more recent data
+                const track1 = clusters[0].sort((a, b) => a.timestamp - b.timestamp);
+                const track2 = clusters[1].sort((a, b) => a.timestamp - b.timestamp);
+
+                const track1Latest = track1[track1.length - 1].timestamp;
+                const track2Latest = track2[track2.length - 1].timestamp;
+
+                dataPoints.length = 0;
+                dataPoints.push(...(track1Latest > track2Latest ? track1 : track2));
+            } else {
+                logDebug(`Not couples account - interleave ratio too low: ${interleaveRatio.toFixed(2)}`);
+            }
+        }
+    }
+
+    // Remove anomalous points if not a couples account
+    if (!isCouplesAccount && anomalies.length > 0 && anomalies.length < dataPoints.length / 2) {
+        // For major jumps, only keep data from one side of the jump
+        if (hasMajorJump && anomalies.length === 1) {
+            const jumpIndex = anomalies[0].index;
+            // Keep the larger group (before or after jump)
+            if (jumpIndex > dataPoints.length / 2) {
+                // More data before jump - keep that
+                dataPoints.length = jumpIndex;
+                logDebug('Kept data before major jump');
+            } else {
+                // More data after jump - keep that
+                dataPoints.splice(0, jumpIndex);
+                logDebug('Kept data after major jump');
+            }
+        } else {
+            // Remove individual anomalous points
+            const filteredPoints = dataPoints.filter((_, index) =>
+                !anomalies.some(a => a.index === index)
+            );
+            if (filteredPoints.length >= 1) {
+                dataPoints.length = 0;
+                dataPoints.push(...filteredPoints);
+                logDebug(`Filtered out ${anomalies.length} anomalous data points`);
+            }
+        }
+    }
+
     const now = Date.now() / 1000;
     const earliest = dataPoints[0];
     const latest = dataPoints[dataPoints.length - 1];
@@ -836,14 +981,14 @@ function estimateCurrentAge(ageData) {
         // Check for decreasing or wildly inconsistent ages
         let hasDecreasingAges = false;
         for (let i = 1; i < dataPoints.length; i++) {
-            if (dataPoints[i].age < dataPoints[i-1].age - 1) { // Allow 1 year tolerance
+            if (dataPoints[i].age < dataPoints[i-1].age - 1) {
                 hasDecreasingAges = true;
                 break;
             }
         }
 
         if (hasDecreasingAges) {
-            return null; // No estimation for inconsistent data
+            return null;
         }
 
         // Calculate variance for very short spans
@@ -854,7 +999,7 @@ function estimateCurrentAge(ageData) {
             const stdDev = Math.sqrt(variance);
 
             if (stdDev > 2) {
-                return null; // Too much variance in short time
+                return null;
             }
         }
 
@@ -866,13 +1011,11 @@ function estimateCurrentAge(ageData) {
         let consistentPoints = 0;
 
         if (dataPoints.length >= 3) {
-            // Check how many points follow expected aging pattern
             for (let i = 1; i < dataPoints.length; i++) {
                 const timeDiff = (dataPoints[i].timestamp - dataPoints[i-1].timestamp) / (365.25 * 24 * 60 * 60);
                 const ageDiff = dataPoints[i].age - dataPoints[i-1].age;
                 const pointRate = timeDiff > 0 ? ageDiff / timeDiff : 0;
 
-                // Allow for rounding and timing within year (rate between 0.7 and 1.5 is reasonable)
                 if (pointRate >= 0.7 && pointRate <= 1.5) {
                     consistentPoints++;
                 }
@@ -880,22 +1023,26 @@ function estimateCurrentAge(ageData) {
             consistencyScore = consistentPoints / (dataPoints.length - 1);
         }
 
-        // Determine confidence with improved logic
-        if (dataPoints.length >= 10 && yearSpan >= 2 && rate >= 0.6 && rate <= 1.6 && consistencyScore >= 0.7) {
-            // Lots of data points spanning years with consistent progression = High confidence
+        // Determine confidence - heavily penalize if major jump was detected
+        if (hasMajorJump) {
+            // Major jump detected = maximum Low confidence
+            confidence = 'Low';
+        } else if (dataPoints.length >= 10 && yearSpan >= 2 && rate >= 0.6 && rate <= 1.6 && consistencyScore >= 0.7 && anomalies.length === 0) {
             confidence = 'High';
-        } else if (dataPoints.length >= 3 && yearSpan >= 2 && rate >= 0.7 && rate <= 1.5) {
-            // Multiple points over years with reasonable rate = High confidence
+        } else if (dataPoints.length >= 3 && yearSpan >= 2 && rate >= 0.7 && rate <= 1.5 && anomalies.length === 0) {
             confidence = 'High';
         } else if (dataPoints.length >= 2 && yearSpan >= 1 && rate >= 0.6 && rate <= 1.6) {
-            // Two+ points over a year with reasonable rate = Medium confidence
-            confidence = 'Medium';
+            confidence = anomalies.length > 0 ? 'Low' : 'Medium';
         } else if (rate >= 0.5 && rate <= 2.0) {
-            // Single point or short span but reasonable rate = Low confidence
             confidence = 'Low';
         } else {
             if (!ENABLE_VERY_LOW_CONFIDENCE) return null;
             confidence = 'Very Low';
+        }
+
+        // Downgrade confidence if anomalies present
+        if (anomalies.length > 0 && confidence === 'High') {
+            confidence = 'Medium';
         }
     }
 
@@ -911,7 +1058,10 @@ function estimateCurrentAge(ageData) {
         estimatedAge,
         confidence,
         dataPoints: dataPoints.length,
-        yearSpan: Math.round(yearSpan * 10) / 10 // Round to 1 decimal
+        yearSpan: Math.round(yearSpan * 10) / 10,
+        anomaliesDetected: anomalies.length > 0,
+        couplesAccount: isCouplesAccount,
+        majorJump: hasMajorJump
     };
 }
 
@@ -1114,20 +1264,37 @@ function showResultsModal(username, ageData) {
         const ageEstimate = estimateCurrentAge(ageData);
         let estimateHTML = '';
         if (ageEstimate) {
-            const confidenceColors = {
-                'High': '#46d160',
-                'Medium': '#ff8c42',
-                'Low': '#ffa500',
-                'Very Low': '#ff6b6b'
-            };
-            const confidenceColor = confidenceColors[ageEstimate.confidence] || '#818384';
-            estimateHTML = `<p style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #343536;">
-                <strong>Estimated Current Age:</strong>
-                <span style="color: ${confidenceColor}; font-weight: bold; font-size: 16px;">${ageEstimate.estimatedAge}</span>
-                <span style="color: #818384; font-size: 12px;"> (${ageEstimate.confidence} Confidence)</span>
-                <br>
-                <span style="color: #818384; font-size: 11px;">Based on ${ageEstimate.dataPoints} data point${ageEstimate.dataPoints > 1 ? 's' : ''} spanning ${ageEstimate.yearSpan} year${ageEstimate.yearSpan !== 1 ? 's' : ''}</span>
-            </p>`;
+            if (ageEstimate.skipped) {
+                // Show anomaly warning instead of estimate
+                estimateHTML = `<p style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #343536;">
+                    <strong style="color: #ff6b6b;">⚠ Age Anomaly Detected</strong>
+                    <br>
+                    <span style="color: #ff6b6b; font-size: 12px;">${ageEstimate.message}</span>
+                </p>`;
+            } else {
+                // Show estimate
+                const confidenceColors = {
+                    'High': '#46d160',
+                    'Medium': '#ff8c42',
+                    'Low': '#ffa500',
+                    'Very Low': '#ff6b6b'
+                };
+                const confidenceColor = confidenceColors[ageEstimate.confidence] || '#818384';
+
+                let anomalyNote = '';
+                if (ageEstimate.anomaliesDetected || ageEstimate.majorJump) {
+                    anomalyNote = '<br><span style="color: #ff8c42; font-size: 11px;">⚠ Age inconsistencies detected in data</span>';
+                }
+
+                estimateHTML = `<p style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #343536;">
+                    <strong>Estimated Current Age:</strong>
+                    <span style="color: ${confidenceColor}; font-weight: bold; font-size: 16px;">${ageEstimate.estimatedAge}</span>
+                    <span style="color: #818384; font-size: 12px;"> (${ageEstimate.confidence} Confidence)</span>
+                    <br>
+                    <span style="color: #818384; font-size: 11px;">Based on ${ageEstimate.dataPoints} data point${ageEstimate.dataPoints > 1 ? 's' : ''} spanning ${ageEstimate.yearSpan} year${ageEstimate.yearSpan !== 1 ? 's' : ''}</span>
+                    ${anomalyNote}
+                </p>`;
+            }
         }
 
         summaryHTML = `<div class="age-summary">
