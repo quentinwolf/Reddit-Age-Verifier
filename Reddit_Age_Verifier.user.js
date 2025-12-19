@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.15
+// @version      1.16
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -1064,6 +1064,8 @@ function showSettingsModal() {
     cancelBtn.onclick = closeModal;
 
     saveBtn.onclick = () => {
+        const oldSortOrder = userSettings.defaultSort;
+
         const newSettings = {
             debugMode: modal.querySelector('#setting-debug').checked,
             minAge: parseInt(modal.querySelector('#setting-min-age').value),
@@ -1085,6 +1087,28 @@ function showSettingsModal() {
         });
 
         saveSettings(newSettings);
+
+        // If sort order changed, update all currently open results modals
+        if (oldSortOrder !== newSettings.defaultSort) {
+            resultsModals.forEach(modalInfo => {
+                // Skip settings modal and only process results modals
+                if (modalInfo.username !== 'settings') {
+                    const sortButton = modalInfo.modal.querySelector('#toggle-sort-order');
+                    if (sortButton) {
+                        // Check if current display matches new setting
+                        const buttonText = sortButton.textContent;
+                        const currentlyShowingNewest = buttonText.includes('Newest First');
+                        const shouldShowNewest = newSettings.defaultSort === 'newest';
+
+                        // If they don't match, toggle the sort
+                        if (currentlyShowingNewest !== shouldShowNewest) {
+                            sortButton.click();
+                        }
+                    }
+                }
+            });
+        }
+
         alert('Settings saved! Please refresh the page for all changes to take effect.');
         closeModal();
     };
@@ -1978,15 +2002,20 @@ function showResultsModal(username, ageData) {
     const topbarHTML = `
         <div class="age-modal-topbar">
             ${summaryHTML}
-            <div class="age-filter-status-container"></div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+                <div class="age-filter-status-container" style="flex: 1;"></div>
+                <button class="age-modal-button secondary" id="toggle-sort-order" style="margin: 0;">
+                    Sort: ${userSettings.defaultSort === 'newest' ? 'Newest First' : 'Oldest First'}
+                </button>
+            </div>
         </div>
     `;
 
     // Apply sort order to results before building HTML
-    if (userSettings.defaultSort === 'newest') {
-        results.reverse(); // Reverse to show newest first
+    if (userSettings.defaultSort === 'oldest') {
+        results.reverse(); // Reverse to show oldest first
     }
-    // If 'oldest', keep default order (already oldest first from API)
+    // If 'newest', keep default order (already newest first from API)
 
     let resultsHTML = '';
     if (results.length > 0) {
@@ -2309,6 +2338,32 @@ function showResultsModal(username, ageData) {
             }
         });
     });
+
+    // Sort toggle functionality
+    const sortButton = modal.querySelector('#toggle-sort-order');
+    if (sortButton) {
+        sortButton.onclick = () => {
+            // Reverse the current display order
+            const container = modal.querySelector('.age-results-container');
+            if (container) {
+                const items = Array.from(container.querySelectorAll('.age-result-item'));
+                items.reverse().forEach(item => container.appendChild(item));
+
+                // Update button text
+                const currentText = sortButton.textContent;
+                if (currentText.includes('Newest')) {
+                    sortButton.textContent = 'Sort: Oldest First';
+                } else {
+                    sortButton.textContent = 'Sort: Newest First';
+                }
+
+                // Scroll to top
+                if (contentContainer) {
+                    contentContainer.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+            }
+        };
+    }
 
     // Apply auto-filter if enabled - select ALL posted ages
     if (userSettings.autoFilterPosted && postedAges.length > 0) {
