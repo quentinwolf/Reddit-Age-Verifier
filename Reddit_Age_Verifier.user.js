@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.08
+// @version      1.09
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -1497,10 +1497,12 @@ function createAgeCheckButton(username) {
         const minAge = Math.min(...cached.postedAges);
         const maxAge = Math.max(...cached.postedAges);
         const ageText = minAge === maxAge ? minAge : `${minAge}-${maxAge}`;
-        button.textContent = `Age: ${ageText} - Recheck`;
+        //button.textContent = `Age: ${ageText} - Recheck`;
+        button.textContent = `Age: ${ageText}`;
         button.classList.add('cached');
     } else if (cached) {
-        button.textContent = 'No Posted Ages - Recheck';
+        //button.textContent = 'No Posted Ages - Recheck';
+        button.textContent = 'No Posted Ages';
         button.classList.add('cached');
     } else {
         button.textContent = 'Check Age';
@@ -1519,10 +1521,12 @@ function updateButtonForUser(username) {
             const minAge = Math.min(...cached.postedAges);
             const maxAge = Math.max(...cached.postedAges);
             const ageText = minAge === maxAge ? minAge : `${minAge}-${maxAge}`;
-            button.textContent = `Age: ${ageText} - Recheck`;
+            //button.textContent = `Age: ${ageText} - Recheck`;
+            button.textContent = `Age: ${ageText}`;
             button.classList.add('cached');
         } else if (cached) {
-            button.textContent = 'No Posted Ages - Recheck';
+            //button.textContent = 'No Posted Ages - Recheck';
+            button.textContent = 'No Posted Ages';
             button.classList.add('cached');
         } else {
             button.textContent = 'Check Age';
