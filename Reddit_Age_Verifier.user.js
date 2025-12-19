@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.28
+// @version      1.29
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -52,6 +52,7 @@ let BODY_SNIPPET_LENGTH = 300;    // Characters to show for post body before tru
 // Cache expiration times
 let CACHE_EXPIRATION = 7 * 24 * 60 * 60 * 1000;      // 1 week for user results
 const TOKEN_EXPIRATION = 24 * 60 * 60 * 1000;          // 24 hours for API token
+const BUTTON_CACHE_EXPIRATION = 365 * 24 * 60 * 60 * 1000; // 1 year for button text
 
 // PushShift API configuration
 const PUSHSHIFT_API_BASE = "https://api.pushshift.io";
@@ -190,6 +191,7 @@ function importSettings(fileInput) {
 // ============================================================================
 
 const ageCache = JSON.parse(GM_getValue('ageVerifierCache', '{}'));
+const buttonCache = JSON.parse(GM_getValue('ageVerifierButtonCache', '{}'));
 let apiToken = null;
 let tokenModal = null;
 let resultsModals = []; // Array to track multiple result modals
@@ -1144,51 +1146,73 @@ function showSettingsModal() {
             <div class="age-settings-section">
                 <div class="age-settings-section-title">📊 Cache Statistics</div>
 
-                <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
-                    <span class="analysis-stat-label">Cached Users</span>
-                    <span class="analysis-stat-value">${(() => {
+                <div style="margin-bottom: 15px;">
+                    <div style="font-weight: bold; margin-bottom: 8px; color: #d7dadc;">Profile Cache (Age Data)</div>
+                    <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
+                        <span class="analysis-stat-label">Cached Users</span>
+                        <span class="analysis-stat-value">${(() => {
+                            const stats = getCacheStatistics();
+                            return stats.userCount;
+                        })()}</span>
+                    </div>
+
+                    <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
+                        <span class="analysis-stat-label">Total Cache Size</span>
+                        <span class="analysis-stat-value">${(() => {
+                            const stats = getCacheStatistics();
+                            return stats.sizeFormatted;
+                        })()}</span>
+                    </div>
+
+                    <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
+                        <span class="analysis-stat-label">Total Posts Cached</span>
+                        <span class="analysis-stat-value">${(() => {
+                            const stats = getCacheStatistics();
+                            return stats.totalPosts.toLocaleString();
+                        })()}</span>
+                    </div>
+
+                    <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
+                        <span class="analysis-stat-label">Average Posts per User</span>
+                        <span class="analysis-stat-value">${(() => {
+                            const stats = getCacheStatistics();
+                            return stats.userCount > 0 ? stats.averagePosts : 0;
+                        })()}</span>
+                    </div>
+
+                    ${(() => {
                         const stats = getCacheStatistics();
-                        return stats.userCount;
-                    })()}</span>
+                        return stats.oldestCache ? `
+                            <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
+                                <span class="analysis-stat-label">Oldest Entry</span>
+                                <span class="analysis-stat-value">${stats.oldestCache.toLocaleDateString()}</span>
+                            </div>
+                            <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
+                                <span class="analysis-stat-label">Newest Entry</span>
+                                <span class="analysis-stat-value">${stats.newestCache.toLocaleDateString()}</span>
+                            </div>
+                        ` : '';
+                    })()}
                 </div>
 
-                <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
-                    <span class="analysis-stat-label">Total Cache Size</span>
-                    <span class="analysis-stat-value">${(() => {
-                        const stats = getCacheStatistics();
-                        return stats.sizeFormatted;
-                    })()}</span>
-                </div>
+                <div style="margin-bottom: 15px;">
+                    <div style="font-weight: bold; margin-bottom: 8px; color: #d7dadc;">Button Cache (Display Text)</div>
+                    <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
+                        <span class="analysis-stat-label">Cached Buttons</span>
+                        <span class="analysis-stat-value">${(() => {
+                            const stats = getCacheStatistics();
+                            return stats.buttonCacheCount;
+                        })()}</span>
+                    </div>
 
-                <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
-                    <span class="analysis-stat-label">Total Posts Cached</span>
-                    <span class="analysis-stat-value">${(() => {
-                        const stats = getCacheStatistics();
-                        return stats.totalPosts.toLocaleString();
-                    })()}</span>
+                    <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
+                        <span class="analysis-stat-label">Button Cache Size</span>
+                        <span class="analysis-stat-value">${(() => {
+                            const stats = getCacheStatistics();
+                            return stats.buttonCacheSizeFormatted;
+                        })()}</span>
+                    </div>
                 </div>
-
-                <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
-                    <span class="analysis-stat-label">Average Posts per User</span>
-                    <span class="analysis-stat-value">${(() => {
-                        const stats = getCacheStatistics();
-                        return stats.userCount > 0 ? stats.averagePosts : 0;
-                    })()}</span>
-                </div>
-
-                ${(() => {
-                    const stats = getCacheStatistics();
-                    return stats.oldestCache ? `
-                        <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
-                            <span class="analysis-stat-label">Oldest Cache Entry</span>
-                            <span class="analysis-stat-value">${stats.oldestCache.toLocaleDateString()}</span>
-                        </div>
-                        <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
-                            <span class="analysis-stat-label">Newest Cache Entry</span>
-                            <span class="analysis-stat-value">${stats.newestCache.toLocaleDateString()}</span>
-                        </div>
-                    ` : '';
-                })()}
 
                 <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
                     <span class="analysis-stat-label">API Token Status</span>
@@ -1201,13 +1225,14 @@ function showSettingsModal() {
                     })()}</span>
                 </div>
 
-                <!-- Clear All Cache Button -->
+                <!-- Cache Clear Buttons -->
                 <div class="age-settings-buttons-row" style="margin-top: 15px;">
-                    <button class="age-modal-button danger" id="clear-all-cache-btn">Clear All Cache</button>
-                    <span class="age-settings-help-text" style="margin-left: 10px; line-height: 32px;">
-                        Remove all cached age verification data
-                    </span>
+                    <button class="age-modal-button danger" id="clear-profile-cache-btn">Clear Profile Cache</button>
+                    <button class="age-modal-button danger" id="clear-button-cache-btn">Clear Button Cache</button>
                 </div>
+                <span class="age-settings-help-text" style="display: block; margin-top: 8px;">
+                    Profile cache stores full age data. Button cache stores display text only.
+                </span>
             </div>
 
             <!-- General Settings -->
@@ -1498,12 +1523,23 @@ function showSettingsModal() {
         }
     };
 
-    const clearAllCacheBtn = modal.querySelector('#clear-all-cache-btn');
-    clearAllCacheBtn.onclick = () => {
-        if (confirm('Clear all cached age verification data? This will remove data for all users.')) {
+    const clearProfileCacheBtn = modal.querySelector('#clear-profile-cache-btn');
+    clearProfileCacheBtn.onclick = () => {
+        if (confirm('Clear all cached age verification data? This will remove full profile data for all users but keep button cache.')) {
             clearAllCache();
 
-            // Update all cached buttons
+            // Refresh the settings modal to update statistics
+            closeModal();
+            showSettingsModal();
+        }
+    };
+
+    const clearButtonCacheBtn = modal.querySelector('#clear-button-cache-btn');
+    clearButtonCacheBtn.onclick = () => {
+        if (confirm('Clear all cached button text? Buttons will show "Check Age" until age is checked again.')) {
+            clearButtonCache();
+
+            // Update all cached buttons to show "Check Age"
             document.querySelectorAll('.age-check-button.cached').forEach(btn => {
                 const username = btn.dataset.username;
                 updateButtonForUser(username);
@@ -1568,6 +1604,27 @@ function clearUserCache(username) {
 function clearAllCache() {
     GM_setValue('ageVerifierCache', '{}');
     Object.keys(ageCache).forEach(key => delete ageCache[key]);
+}
+
+function getButtonCacheText(username) {
+    const cached = buttonCache[username];
+    if (cached && Date.now() - cached.timestamp < BUTTON_CACHE_EXPIRATION) {
+        return cached.text;
+    }
+    return null;
+}
+
+function setButtonCacheText(username, displayText) {
+    buttonCache[username] = {
+        text: displayText,
+        timestamp: Date.now()
+    };
+    GM_setValue('ageVerifierButtonCache', JSON.stringify(buttonCache));
+}
+
+function clearButtonCache() {
+    GM_setValue('ageVerifierButtonCache', '{}');
+    Object.keys(buttonCache).forEach(key => delete buttonCache[key]);
 }
 
 // ============================================================================
@@ -3109,6 +3166,9 @@ function getCacheStatistics() {
         oldestCache: null,
         newestCache: null,
         averagePosts: 0,
+        buttonCacheCount: 0,
+        buttonCacheSize: 0,
+        buttonCacheSizeFormatted: '0 KB',
         hasToken: apiToken !== null,
         tokenAge: null
     };
@@ -3143,6 +3203,20 @@ function getCacheStatistics() {
     // Calculate cache size
     const cacheString = JSON.stringify(ageCache);
     stats.totalSize = cacheString.length;
+
+    // Calculate button cache stats
+    const buttonCacheUsers = Object.keys(buttonCache);
+    stats.buttonCacheCount = buttonCacheUsers.length;
+    const buttonCacheString = JSON.stringify(buttonCache);
+    stats.buttonCacheSize = buttonCacheString.length;
+
+    if (stats.buttonCacheSize < 1024) {
+        stats.buttonCacheSizeFormatted = stats.buttonCacheSize + ' B';
+    } else if (stats.buttonCacheSize < 1024 * 1024) {
+        stats.buttonCacheSizeFormatted = (stats.buttonCacheSize / 1024).toFixed(2) + ' KB';
+    } else {
+        stats.buttonCacheSizeFormatted = (stats.buttonCacheSize / (1024 * 1024)).toFixed(2) + ' MB';
+    }
 
     // Format size
     if (stats.totalSize < 1024) {
@@ -4103,6 +4177,9 @@ function showDeepAnalysisModal(username, ageData, analysis) {
             // Update cache
             setCachedAgeData(username, mergedAgeData);
 
+            // Update button cache
+            updateButtonCacheForUser(username, mergedAgeData);
+
             // Re-run analysis
             const newAnalysis = performDeepAnalysis(mergedAgeData, username);
 
@@ -4736,6 +4813,9 @@ async function handleAgeCheck(username) {
         // Cache the results
         setCachedAgeData(username, ageData);
 
+        // Update button cache
+        updateButtonCacheForUser(username, ageData);
+
         // Update button
         updateButtonForUser(username);
 
@@ -4773,15 +4853,10 @@ function createAgeCheckButton(username) {
     button.className = 'age-check-button';
     button.dataset.username = username;
 
-    const cached = getCachedAgeData(username);
-    if (cached && cached.postedAges && cached.postedAges.length > 0) {
-        const minAge = Math.min(...cached.postedAges);
-        const maxAge = Math.max(...cached.postedAges);
-        const ageText = minAge === maxAge ? minAge : `${minAge}-${maxAge}`;
-        button.textContent = `Age: ${ageText}`;
-        button.classList.add('cached');
-    } else if (cached) {
-        button.textContent = 'No Posted Ages';
+    // Check button cache first (lightweight)
+    const buttonText = getButtonCacheText(username);
+    if (buttonText) {
+        button.textContent = buttonText;
         button.classList.add('cached');
     } else {
         button.textContent = 'Check Age';
@@ -4795,23 +4870,30 @@ function createAgeCheckButton(username) {
 function updateButtonForUser(username) {
     const buttons = document.querySelectorAll(`.age-check-button[data-username="${username}"]`);
     buttons.forEach(button => {
-        const cached = getCachedAgeData(username);
-        if (cached && cached.postedAges && cached.postedAges.length > 0) {
-            const minAge = Math.min(...cached.postedAges);
-            const maxAge = Math.max(...cached.postedAges);
-            const ageText = minAge === maxAge ? minAge : `${minAge}-${maxAge}`;
-            //button.textContent = `Age: ${ageText} - Recheck`;
-            button.textContent = `Age: ${ageText}`;
-            button.classList.add('cached');
-        } else if (cached) {
-            //button.textContent = 'No Posted Ages - Recheck';
-            button.textContent = 'No Posted Ages';
+        const buttonText = getButtonCacheText(username);
+        if (buttonText) {
+            button.textContent = buttonText;
             button.classList.add('cached');
         } else {
             button.textContent = 'Check Age';
             button.classList.remove('cached');
         }
     });
+}
+
+function updateButtonCacheForUser(username, ageData) {
+    let displayText;
+    if (ageData && ageData.postedAges && ageData.postedAges.length > 0) {
+        const minAge = Math.min(...ageData.postedAges);
+        const maxAge = Math.max(...ageData.postedAges);
+        const ageText = minAge === maxAge ? minAge : `${minAge}-${maxAge}`;
+        displayText = `Age: ${ageText}`;
+    } else if (ageData) {
+        displayText = 'No Posted Ages';
+    } else {
+        return; // Don't cache if no data
+    }
+    setButtonCacheText(username, displayText);
 }
 
 function hasAgeButton(tagline) {
