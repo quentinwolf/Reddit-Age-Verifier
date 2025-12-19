@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.29
+// @version      1.30
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -3450,6 +3450,9 @@ function escapeHtml(text) {
 }
 
 function showResultsModal(username, ageData) {
+    // Update button cache since we're displaying this data
+    updateButtonCacheForUser(username, ageData);
+
     const modalId = `age-modal-${modalCounter++}`;
 
     const overlay = document.createElement('div');
@@ -3688,6 +3691,9 @@ function showResultsModal(username, ageData) {
         // Remove transform on first interaction for proper resizing
         normalizeModalPosition(modal);
     });
+
+    // Update all buttons for this user on the page
+    updateButtonForUser(username);
 
     // Store modal reference
     resultsModals.push({ modalId, modal, overlay, username });
@@ -4040,6 +4046,9 @@ function showErrorModal(username, error) {
 }
 
 function showDeepAnalysisModal(username, ageData, analysis) {
+    // Update button cache since we're displaying this data
+    updateButtonCacheForUser(username, ageData);
+
     const modalId = `age-modal-${modalCounter++}`;
 
     const modal = document.createElement('div');
@@ -4100,6 +4109,9 @@ function showDeepAnalysisModal(username, ageData, analysis) {
         bringToFront(modal);
         normalizeModalPosition(modal);
     });
+
+    // Update all buttons for this user on the page
+    updateButtonForUser(username);
 
     resultsModals.push({ modalId, modal, overlay: null, username, ageData, analysis });
 
