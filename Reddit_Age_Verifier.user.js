@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.12
+// @version      1.13
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -774,10 +774,38 @@ function processResults(results, username) {
             foundAges.posted.forEach(age => ageData.postedAges.add(age));
             foundAges.possible.forEach(age => ageData.possibleAges.add(age));
 
+            // Remove title from selftext if it's duplicated (with flexible matching)
+            let cleanSelftext = selftext || '';
+            if (cleanSelftext && title) {
+                // Normalize both strings for comparison (remove special chars, extra spaces)
+                const normalizeForComparison = (str) => {
+                    return str.toLowerCase()
+                        .replace(/[#\[\]\(\)\{\}]/g, '') // Remove brackets and hash
+                        .replace(/\s+/g, ' ')             // Normalize whitespace
+                        .trim();
+                };
+
+                const titleNormalized = normalizeForComparison(title);
+                const selftextNormalized = normalizeForComparison(cleanSelftext.substring(0, title.length + 50));
+
+                // If the start of selftext matches title (normalized), it's a duplicate
+                if (selftextNormalized.startsWith(titleNormalized.substring(0, Math.min(titleNormalized.length, 30)))) {
+                    // Remove the duplicate title portion from selftext
+                    // Find where the actual different content starts
+                    const words = title.split(/\s+/);
+                    const lastWord = words[words.length - 1];
+                    const lastWordIndex = cleanSelftext.toLowerCase().indexOf(lastWord.toLowerCase());
+
+                    if (lastWordIndex !== -1) {
+                        cleanSelftext = cleanSelftext.substring(lastWordIndex + lastWord.length).trim();
+                    }
+                }
+            }
+
             // Create snippet from title (prioritize) or selftext
             let snippet = title;
             if (!snippet || snippet.length < 50) {
-                snippet = title + (selftext ? ' - ' + selftext.substring(0, 150) : '');
+                snippet = title + (cleanSelftext ? ' - ' + cleanSelftext.substring(0, 150) : '');
             }
             if (snippet.length > 200) {
                 snippet = snippet.substring(0, 200) + '...';
@@ -803,13 +831,13 @@ function processResults(results, username) {
             ageData.results.push({
                 postedAges: foundAges.posted,
                 possibleAges: foundAges.possible,
-                allAges: [...foundAges.posted, ...foundAges.possible], // Combined for filtering
+                allAges: [...foundAges.posted, ...foundAges.possible],
                 date: formattedDate,
                 subreddit: post.subreddit,
                 snippet: snippet,
                 permalink: `https://reddit.com${post.permalink}`,
                 title: title,
-                selftext: selftext || ''
+                selftext: cleanSelftext  // Use cleaned version instead of original
             });
         }
     });
