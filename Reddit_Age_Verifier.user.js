@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.19
+// @version      1.20
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -75,6 +75,8 @@ const DEFAULT_SETTINGS = {
     showAgeEstimation: true,
     defaultSort: 'newest', // 'oldest' or 'newest'
     autoFilterPosted: false, // auto-filter to show only posted ages
+    modalWidth: 800, // default results modal width in pixels
+    modalHeight: 900, // default results modal height in pixels
     commonBots: {
         AutoModerator: true,
         RepostSleuthBot: true,
@@ -993,6 +995,18 @@ function showSettingsModal() {
                     <input type="number" class="age-settings-input" id="setting-cache-days"
                            value="${userSettings.cacheExpiration}" min="1" max="90">
                 </div>
+
+                <div class="age-settings-row">
+                    <label class="age-settings-label">Default Modal Width (pixels)</label>
+                    <input type="number" class="age-settings-input" id="setting-modal-width"
+                           value="${userSettings.modalWidth}" min="400" max="2000">
+                </div>
+
+                <div class="age-settings-row">
+                    <label class="age-settings-label">Default Modal Height (pixels)</label>
+                    <input type="number" class="age-settings-input" id="setting-modal-height"
+                           value="${userSettings.modalHeight}" min="300" max="2000">
+                </div>
             </div>
 
             <!-- Common Bots -->
@@ -1072,6 +1086,8 @@ function showSettingsModal() {
             titleSnippetLength: parseInt(modal.querySelector('#setting-title-length').value),
             bodySnippetLength: parseInt(modal.querySelector('#setting-body-length').value),
             cacheExpiration: parseInt(modal.querySelector('#setting-cache-days').value),
+            modalWidth: parseInt(modal.querySelector('#setting-modal-width').value),
+            modalHeight: parseInt(modal.querySelector('#setting-modal-height').value),
             showAgeEstimation: modal.querySelector('#setting-show-estimation').checked,
             defaultSort: modal.querySelector('#setting-sort-order').value,
             autoFilterPosted: modal.querySelector('#setting-auto-filter').checked,
@@ -1897,8 +1913,8 @@ function showResultsModal(username, ageData) {
     modal.className = 'age-modal resizable';
     modal.dataset.modalId = modalId;
     modal.style.minWidth = '600px';
-    modal.style.width = '800px';
-    modal.style.height = '900px';
+    modal.style.width = `${userSettings.modalWidth}px`;
+    modal.style.height = `${userSettings.modalHeight}px`;
     modal.style.zIndex = ++zIndexCounter;
 
     const postedAges = ageData.postedAges;
