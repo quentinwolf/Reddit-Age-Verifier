@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.20
+// @version      1.21
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -77,6 +77,7 @@ const DEFAULT_SETTINGS = {
     autoFilterPosted: false, // auto-filter to show only posted ages
     modalWidth: 800, // default results modal width in pixels
     modalHeight: 900, // default results modal height in pixels
+    trackedSubreddits: [], // subreddits to compare age behavior against
     commonBots: {
         AutoModerator: true,
         RepostSleuthBot: true,
@@ -751,6 +752,225 @@ GM_addStyle(`
         margin-top: 5px;
         font-style: italic;
     }
+
+    /* Deep Analysis Modal Styles */
+    .deep-analysis-section {
+        background-color: #272729;
+        border: 1px solid #343536;
+        border-radius: 6px;
+        margin-bottom: 15px;
+        overflow: hidden;
+    }
+
+    .deep-analysis-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 15px;
+        background-color: #1f1f21;
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .deep-analysis-header:hover {
+        background-color: #2a2a2c;
+    }
+
+    .deep-analysis-title {
+        font-weight: bold;
+        font-size: 14px;
+        color: #d7dadc;
+    }
+
+    .deep-analysis-toggle {
+        color: #818384;
+        font-size: 12px;
+    }
+
+    .deep-analysis-content {
+        padding: 15px;
+        border-top: 1px solid #343536;
+    }
+
+    .deep-analysis-content.collapsed {
+        display: none;
+    }
+
+    .analysis-stat-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 8px 0;
+        border-bottom: 1px solid #343536;
+    }
+
+    .analysis-stat-row:last-child {
+        border-bottom: none;
+    }
+
+    .analysis-stat-label {
+        color: #818384;
+        font-size: 13px;
+    }
+
+    .analysis-stat-value {
+        color: #d7dadc;
+        font-size: 13px;
+        font-weight: 500;
+    }
+
+    .analysis-stat-value.warning {
+        color: #ff8c42;
+    }
+
+    .analysis-stat-value.danger {
+        color: #ff6b6b;
+    }
+
+    .analysis-stat-value.success {
+        color: #46d160;
+    }
+
+    .analysis-stat-value.info {
+        color: #0079d3;
+    }
+
+    .timeline-entry {
+        display: flex;
+        padding: 8px 12px;
+        border-left: 3px solid #343536;
+        margin-bottom: 8px;
+        background-color: #1f1f21;
+        border-radius: 0 4px 4px 0;
+    }
+
+    .timeline-entry.age-increase {
+        border-left-color: #46d160;
+    }
+
+    .timeline-entry.age-decrease {
+        border-left-color: #ff6b6b;
+    }
+
+    .timeline-entry.age-same {
+        border-left-color: #818384;
+    }
+
+    .timeline-entry.first-post {
+        border-left-color: #0079d3;
+    }
+
+    .timeline-date {
+        color: #818384;
+        font-size: 11px;
+        min-width: 140px;
+    }
+
+    .timeline-age {
+        font-weight: bold;
+        min-width: 60px;
+    }
+
+    .timeline-subreddit {
+        color: #0079d3;
+        font-size: 12px;
+        min-width: 150px;
+    }
+
+    .timeline-change {
+        color: #818384;
+        font-size: 12px;
+        flex: 1;
+    }
+
+    .subreddit-comparison-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+    }
+
+    .subreddit-comparison-table th {
+        text-align: left;
+        padding: 8px;
+        background-color: #1f1f21;
+        color: #818384;
+        font-weight: normal;
+        border-bottom: 1px solid #343536;
+    }
+
+    .subreddit-comparison-table td {
+        padding: 8px;
+        border-bottom: 1px solid #343536;
+        color: #d7dadc;
+    }
+
+    .subreddit-comparison-table tr:last-child td {
+        border-bottom: none;
+    }
+
+    .couples-track {
+        background-color: #1f1f21;
+        border: 1px solid #343536;
+        border-radius: 4px;
+        padding: 12px;
+        margin-bottom: 10px;
+    }
+
+    .couples-track-title {
+        font-weight: bold;
+        margin-bottom: 8px;
+        color: #d7dadc;
+    }
+
+    .birthday-estimate {
+        background-color: #1f1f21;
+        border-radius: 4px;
+        padding: 15px;
+        text-align: center;
+    }
+
+    .birthday-month-range {
+        font-size: 18px;
+        font-weight: bold;
+        color: #0079d3;
+        margin-bottom: 5px;
+    }
+
+    .birthday-confidence {
+        font-size: 12px;
+        color: #818384;
+    }
+
+    .fetch-more-container {
+        text-align: center;
+        padding: 15px;
+        border-top: 1px solid #343536;
+        margin-top: 15px;
+    }
+
+    .fetch-more-status {
+        color: #818384;
+        font-size: 12px;
+        margin-top: 8px;
+    }
+
+    .anomaly-item {
+        background-color: #4a1c1c;
+        border-left: 3px solid #ff6b6b;
+        padding: 10px 12px;
+        margin-bottom: 8px;
+        border-radius: 0 4px 4px 0;
+    }
+
+    .anomaly-description {
+        color: #ff6b6b;
+        font-size: 13px;
+    }
+
+    .anomaly-date {
+        color: #818384;
+        font-size: 11px;
+        margin-top: 4px;
+    }
 `);
 
 // Debug Function to log messages to console if enabled at top of script
@@ -1018,16 +1238,26 @@ function showSettingsModal() {
                 </div>
             </div>
 
+            <!-- Tracked Subreddits -->
+            <div class="age-settings-section">
+                <div class="age-settings-section-title">Tracked Subreddits</div>
+                <p class="age-settings-help-text">Subreddits you moderate - used in Deep Analysis to detect if users post different ages on your subs vs elsewhere. Enter comma-separated names (with or without r/ prefix).</p>
+                <input type="text" class="age-settings-input" id="setting-tracked-subs"
+                       style="width: 100%; font-family: monospace;"
+                       value="${(userSettings.trackedSubreddits || []).join(', ')}"
+                       placeholder="subreddit1, subreddit2, r/subreddit3">
+            </div>
+
             <!-- Ignored Users -->
             <div class="age-settings-section">
                 <div class="age-settings-section-title">Ignored Users</div>
+                ${ignoredUsersListHTML}<br />
                 <p class="age-settings-help-text">Add usernames (one per line) to never show age check buttons for</p>
                 <textarea class="age-settings-textarea" id="ignored-users-input"
                           placeholder="username1&#10;username2&#10;username3"></textarea>
                 <div class="age-settings-buttons-row">
                     <button class="age-modal-button" id="add-ignored-users">Add Users</button>
                 </div>
-                ${ignoredUsersListHTML}
             </div>
 
             <!-- Import/Export -->
@@ -1078,6 +1308,13 @@ function showSettingsModal() {
     saveBtn.onclick = () => {
         const oldSortOrder = userSettings.defaultSort;
 
+        // Parse tracked subreddits - normalize by removing r/ prefix and trimming
+        const trackedSubsInput = modal.querySelector('#setting-tracked-subs').value;
+        const trackedSubreddits = trackedSubsInput
+            .split(',')
+            .map(s => s.trim().replace(/^r\/|^\/r\//i, '').toLowerCase())
+            .filter(s => s.length > 0);
+
         const newSettings = {
             debugMode: modal.querySelector('#setting-debug').checked,
             minAge: parseInt(modal.querySelector('#setting-min-age').value),
@@ -1092,6 +1329,7 @@ function showSettingsModal() {
             defaultSort: modal.querySelector('#setting-sort-order').value,
             autoFilterPosted: modal.querySelector('#setting-auto-filter').checked,
             ignoredUsers: userSettings.ignoredUsers, // Keep existing
+            trackedSubreddits: trackedSubreddits,
             commonBots: {}
         };
 
@@ -1764,6 +2002,710 @@ function estimateCurrentAge(ageData) {
     };
 }
 
+// ============================================================================
+// DEEP ANALYSIS FUNCTIONS
+// ============================================================================
+
+function performDeepAnalysis(ageData, username) {
+    const analysis = {
+        username: username,
+        totalPosts: ageData.results.length,
+        postedAges: ageData.postedAges,
+        possibleAges: ageData.possibleAges,
+        timeline: [],
+        backwardsAging: [],
+        subredditComparison: {
+            tracked: { ages: new Set(), posts: [] },
+            other: { ages: new Set(), posts: [] }
+        },
+        ageExtremes: null,
+        birthdayEstimate: null,
+        couplesAnalysis: null,
+        ageTransitions: [],
+        recentAgeChange: null,
+        consistencyScore: 0
+    };
+
+    // Build timeline from results (only posted ages)
+    const timelinePoints = [];
+    ageData.results.forEach(result => {
+        if (result.postedAges && result.postedAges.length > 0) {
+            result.postedAges.forEach(age => {
+                timelinePoints.push({
+                    timestamp: result.timestamp,
+                    date: result.date,
+                    age: age,
+                    subreddit: result.subreddit.toLowerCase(),
+                    permalink: result.permalink
+                });
+            });
+        }
+    });
+
+    // Sort chronologically (oldest first)
+    timelinePoints.sort((a, b) => a.timestamp - b.timestamp);
+    analysis.timeline = timelinePoints;
+
+    if (timelinePoints.length === 0) {
+        return analysis;
+    }
+
+    // Detect backwards aging
+    analysis.backwardsAging = detectBackwardsAging(timelinePoints);
+
+    // Analyze subreddit behavior
+    analysis.subredditComparison = analyzeSubredditBehavior(timelinePoints, userSettings.trackedSubreddits || []);
+
+    // Calculate age extremes
+    analysis.ageExtremes = calculateAgeExtremes(timelinePoints);
+
+    // Detect age transitions
+    analysis.ageTransitions = detectAgeTransitions(timelinePoints);
+
+    // Check for recent age change
+    analysis.recentAgeChange = detectRecentAgeChange(timelinePoints);
+
+    // Enhanced couples detection
+    analysis.couplesAnalysis = detectCouplesAccountEnhanced(timelinePoints);
+
+    // Estimate birthday (only if not couples account or analyze primary track)
+    if (!analysis.couplesAnalysis.isCouplesAccount) {
+        analysis.birthdayEstimate = estimateBirthday(timelinePoints);
+    } else {
+        // Estimate for each track
+        analysis.couplesAnalysis.tracks.forEach(track => {
+            track.birthdayEstimate = estimateBirthday(track.points);
+            track.currentAgeEstimate = estimateCurrentAgeFromPoints(track.points);
+        });
+    }
+
+    // Calculate consistency score
+    analysis.consistencyScore = calculateConsistencyScore(timelinePoints, analysis.backwardsAging);
+
+    return analysis;
+}
+
+function detectBackwardsAging(timelinePoints) {
+    const anomalies = [];
+
+    for (let i = 1; i < timelinePoints.length; i++) {
+        const prev = timelinePoints[i - 1];
+        const curr = timelinePoints[i];
+
+        // If current age is younger than previous, that's backwards aging
+        if (curr.age < prev.age) {
+            const daysBetween = (curr.timestamp - prev.timestamp) / (24 * 60 * 60);
+            anomalies.push({
+                fromAge: prev.age,
+                toAge: curr.age,
+                fromDate: prev.date,
+                toDate: curr.date,
+                fromTimestamp: prev.timestamp,
+                toTimestamp: curr.timestamp,
+                daysBetween: Math.round(daysBetween),
+                fromSubreddit: prev.subreddit,
+                toSubreddit: curr.subreddit,
+                ageDrop: prev.age - curr.age,
+                permalink: curr.permalink
+            });
+        }
+    }
+
+    return anomalies;
+}
+
+function analyzeSubredditBehavior(timelinePoints, trackedSubs) {
+    const trackedLower = trackedSubs.map(s => s.toLowerCase());
+
+    const result = {
+        tracked: { ages: new Set(), posts: [], subreddits: new Set() },
+        other: { ages: new Set(), posts: [], subreddits: new Set() },
+        ageDiscrepancy: false,
+        onlyOlderOnTracked: false,
+        onlyYoungerOnTracked: false,
+        trackedAgeRange: null,
+        otherAgeRange: null
+    };
+
+    if (trackedLower.length === 0) {
+        // No tracked subs configured
+        timelinePoints.forEach(point => {
+            result.other.ages.add(point.age);
+            result.other.posts.push(point);
+            result.other.subreddits.add(point.subreddit);
+        });
+        return result;
+    }
+
+    timelinePoints.forEach(point => {
+        const isTracked = trackedLower.includes(point.subreddit);
+        if (isTracked) {
+            result.tracked.ages.add(point.age);
+            result.tracked.posts.push(point);
+            result.tracked.subreddits.add(point.subreddit);
+        } else {
+            result.other.ages.add(point.age);
+            result.other.posts.push(point);
+            result.other.subreddits.add(point.subreddit);
+        }
+    });
+
+    // Convert Sets to arrays for comparison
+    const trackedAges = Array.from(result.tracked.ages).sort((a, b) => a - b);
+    const otherAges = Array.from(result.other.ages).sort((a, b) => a - b);
+
+    if (trackedAges.length > 0) {
+        result.trackedAgeRange = {
+            min: Math.min(...trackedAges),
+            max: Math.max(...trackedAges),
+            ages: trackedAges
+        };
+    }
+
+    if (otherAges.length > 0) {
+        result.otherAgeRange = {
+            min: Math.min(...otherAges),
+            max: Math.max(...otherAges),
+            ages: otherAges
+        };
+    }
+
+    // Check for discrepancies
+    if (trackedAges.length > 0 && otherAges.length > 0) {
+        const trackedMin = Math.min(...trackedAges);
+        const trackedMax = Math.max(...trackedAges);
+        const otherMin = Math.min(...otherAges);
+        const otherMax = Math.max(...otherAges);
+
+        // Check if they're posting older on tracked subs
+        if (trackedMin > otherMax) {
+            result.onlyOlderOnTracked = true;
+            result.ageDiscrepancy = true;
+        }
+
+        // Check if they're posting younger on tracked subs
+        if (trackedMax < otherMin) {
+            result.onlyYoungerOnTracked = true;
+            result.ageDiscrepancy = true;
+        }
+
+        // General discrepancy - no overlap in ages
+        const hasOverlap = trackedAges.some(age => otherAges.includes(age));
+        if (!hasOverlap && (trackedMax < otherMin - 2 || trackedMin > otherMax + 2)) {
+            result.ageDiscrepancy = true;
+        }
+    }
+
+    return result;
+}
+
+function calculateAgeExtremes(timelinePoints) {
+    if (timelinePoints.length === 0) return null;
+
+    const ages = timelinePoints.map(p => p.age);
+    const uniqueAges = [...new Set(ages)].sort((a, b) => a - b);
+
+    const min = Math.min(...ages);
+    const max = Math.max(...ages);
+    const spread = max - min;
+
+    // Calculate standard deviation
+    const mean = ages.reduce((a, b) => a + b, 0) / ages.length;
+    const variance = ages.reduce((sum, age) => sum + Math.pow(age - mean, 2), 0) / ages.length;
+    const stdDev = Math.sqrt(variance);
+
+    // Find first and last occurrence of each age
+    const ageOccurrences = {};
+    timelinePoints.forEach(point => {
+        if (!ageOccurrences[point.age]) {
+            ageOccurrences[point.age] = { first: point, last: point, count: 0 };
+        }
+        ageOccurrences[point.age].last = point;
+        ageOccurrences[point.age].count++;
+    });
+
+    return {
+        min,
+        max,
+        spread,
+        mean: Math.round(mean * 10) / 10,
+        stdDev: Math.round(stdDev * 100) / 100,
+        uniqueAges,
+        ageOccurrences,
+        isExtreme: spread >= 5 // Flag if spread is 5+ years
+    };
+}
+
+function detectAgeTransitions(timelinePoints) {
+    const transitions = [];
+
+    if (timelinePoints.length < 2) return transitions;
+
+    let currentAge = timelinePoints[0].age;
+    let currentAgeStart = timelinePoints[0];
+
+    for (let i = 1; i < timelinePoints.length; i++) {
+        if (timelinePoints[i].age !== currentAge) {
+            transitions.push({
+                fromAge: currentAge,
+                toAge: timelinePoints[i].age,
+                fromDate: currentAgeStart.date,
+                toDate: timelinePoints[i].date,
+                fromTimestamp: currentAgeStart.timestamp,
+                toTimestamp: timelinePoints[i].timestamp,
+                daysBetween: Math.round((timelinePoints[i].timestamp - currentAgeStart.timestamp) / (24 * 60 * 60)),
+                direction: timelinePoints[i].age > currentAge ? 'increase' : 'decrease',
+                change: timelinePoints[i].age - currentAge
+            });
+            currentAge = timelinePoints[i].age;
+            currentAgeStart = timelinePoints[i];
+        }
+    }
+
+    return transitions;
+}
+
+function detectRecentAgeChange(timelinePoints) {
+    if (timelinePoints.length < 2) return null;
+
+    const now = Date.now() / 1000;
+    const thirtyDaysAgo = now - (30 * 24 * 60 * 60);
+    const ninetyDaysAgo = now - (90 * 24 * 60 * 60);
+
+    // Get recent posts
+    const recentPosts = timelinePoints.filter(p => p.timestamp > ninetyDaysAgo);
+    if (recentPosts.length < 2) return null;
+
+    // Find if there was an age change in recent posts
+    const recentAges = [...new Set(recentPosts.map(p => p.age))];
+    if (recentAges.length === 1) return null;
+
+    // Find the transition
+    const sortedRecent = [...recentPosts].sort((a, b) => a.timestamp - b.timestamp);
+    let lastChange = null;
+
+    for (let i = 1; i < sortedRecent.length; i++) {
+        if (sortedRecent[i].age !== sortedRecent[i-1].age) {
+            lastChange = {
+                fromAge: sortedRecent[i-1].age,
+                toAge: sortedRecent[i].age,
+                date: sortedRecent[i].date,
+                timestamp: sortedRecent[i].timestamp,
+                daysAgo: Math.round((now - sortedRecent[i].timestamp) / (24 * 60 * 60)),
+                isVeryRecent: sortedRecent[i].timestamp > thirtyDaysAgo
+            };
+        }
+    }
+
+    return lastChange;
+}
+
+function detectCouplesAccountEnhanced(timelinePoints) {
+    const result = {
+        isCouplesAccount: false,
+        confidence: 'None',
+        tracks: [],
+        interleaveRatio: 0,
+        explanation: ''
+    };
+
+    if (timelinePoints.length < 6) {
+        result.explanation = 'Not enough data points to detect couples account';
+        return result;
+    }
+
+    // Group ages into clusters (within 4 years of each other)
+    const clusters = [];
+    timelinePoints.forEach((point, idx) => {
+        let foundCluster = false;
+        for (let cluster of clusters) {
+            const avgAge = cluster.reduce((sum, p) => sum + p.age, 0) / cluster.length;
+            if (Math.abs(avgAge - point.age) <= 4) {
+                cluster.push({...point, originalIndex: idx});
+                foundCluster = true;
+                break;
+            }
+        }
+        if (!foundCluster) {
+            clusters.push([{...point, originalIndex: idx}]);
+        }
+    });
+
+    // Need exactly 2 substantial clusters
+    const substantialClusters = clusters.filter(c => c.length >= 3);
+    if (substantialClusters.length !== 2) {
+        result.explanation = `Found ${substantialClusters.length} age clusters (need exactly 2 for couples detection)`;
+        return result;
+    }
+
+    const cluster1 = substantialClusters[0];
+    const cluster2 = substantialClusters[1];
+
+    // Calculate interleave score
+    const cluster1Indices = new Set(cluster1.map(p => p.originalIndex));
+    let interleaveScore = 0;
+
+    for (let i = 0; i < timelinePoints.length - 1; i++) {
+        const isInCluster1 = cluster1Indices.has(i);
+        const nextIsInCluster1 = cluster1Indices.has(i + 1);
+        if (isInCluster1 !== nextIsInCluster1) {
+            interleaveScore++;
+        }
+    }
+
+    result.interleaveRatio = interleaveScore / (timelinePoints.length - 1);
+
+    // If interleave ratio is above threshold, likely couples account
+    if (result.interleaveRatio >= 0.35) {
+        result.isCouplesAccount = true;
+
+        // Determine confidence
+        if (result.interleaveRatio >= 0.6 && cluster1.length >= 5 && cluster2.length >= 5) {
+            result.confidence = 'High';
+        } else if (result.interleaveRatio >= 0.45) {
+            result.confidence = 'Medium';
+        } else {
+            result.confidence = 'Low';
+        }
+
+        // Build track information
+        const track1Ages = cluster1.map(p => p.age);
+        const track2Ages = cluster2.map(p => p.age);
+
+        result.tracks = [
+            {
+                name: 'Person A',
+                points: cluster1.sort((a, b) => a.timestamp - b.timestamp),
+                ageRange: {
+                    min: Math.min(...track1Ages),
+                    max: Math.max(...track1Ages)
+                },
+                postCount: cluster1.length
+            },
+            {
+                name: 'Person B',
+                points: cluster2.sort((a, b) => a.timestamp - b.timestamp),
+                ageRange: {
+                    min: Math.min(...track2Ages),
+                    max: Math.max(...track2Ages)
+                },
+                postCount: cluster2.length
+            }
+        ];
+
+        // Sort tracks so older person is first
+        result.tracks.sort((a, b) => b.ageRange.max - a.ageRange.max);
+        result.tracks[0].name = 'Person A (older)';
+        result.tracks[1].name = 'Person B (younger)';
+
+        result.explanation = `Detected alternating age patterns suggesting two people sharing this account`;
+    } else {
+        result.explanation = `Interleave ratio (${(result.interleaveRatio * 100).toFixed(0)}%) too low for couples detection`;
+    }
+
+    return result;
+}
+
+function estimateBirthday(timelinePoints) {
+    if (timelinePoints.length < 2) {
+        return { confidence: 'None', reason: 'Insufficient data' };
+    }
+
+    // Find age transitions that look like birthdays (age increases by 1)
+    const birthdayTransitions = [];
+
+    // Sort by timestamp
+    const sorted = [...timelinePoints].sort((a, b) => a.timestamp - b.timestamp);
+
+    // Track age spans
+    const ageSpans = {};
+    let currentAge = sorted[0].age;
+    let ageStart = sorted[0].timestamp;
+
+    for (let i = 1; i < sorted.length; i++) {
+        if (sorted[i].age !== currentAge) {
+            // Record the span for the previous age
+            if (!ageSpans[currentAge]) {
+                ageSpans[currentAge] = [];
+            }
+            ageSpans[currentAge].push({
+                start: ageStart,
+                end: sorted[i - 1].timestamp,
+                duration: sorted[i - 1].timestamp - ageStart
+            });
+
+            // Check if this is a +1 transition
+            if (sorted[i].age === currentAge + 1) {
+                birthdayTransitions.push({
+                    age: sorted[i].age,
+                    timestamp: sorted[i].timestamp,
+                    prevEnd: sorted[i - 1].timestamp,
+                    gap: sorted[i].timestamp - sorted[i - 1].timestamp
+                });
+            }
+
+            currentAge = sorted[i].age;
+            ageStart = sorted[i].timestamp;
+        }
+    }
+
+    // Record final span
+    if (!ageSpans[currentAge]) {
+        ageSpans[currentAge] = [];
+    }
+    ageSpans[currentAge].push({
+        start: ageStart,
+        end: sorted[sorted.length - 1].timestamp,
+        duration: sorted[sorted.length - 1].timestamp - ageStart
+    });
+
+    // Analyze birthday transitions
+    if (birthdayTransitions.length === 0) {
+        // Try to estimate from account age and posting patterns
+        return estimateBirthdayFromPatterns(sorted, ageSpans);
+    }
+
+    // Calculate estimated birthday months from transitions
+    const birthdayMonths = birthdayTransitions.map(t => {
+        // Birthday likely occurred between prevEnd and timestamp
+        // Weight towards the transition timestamp
+        const midpoint = t.prevEnd + (t.gap * 0.3); // Assume birthday is 30% into the gap
+        const date = new Date(midpoint * 1000);
+        return {
+            month: date.getMonth(),
+            year: date.getFullYear(),
+            confidence: t.gap < (30 * 24 * 60 * 60) ? 'High' : // Gap < 30 days
+                        t.gap < (90 * 24 * 60 * 60) ? 'Medium' : 'Low' // Gap < 90 days
+        };
+    });
+
+    if (birthdayMonths.length === 1) {
+        return formatBirthdayEstimate(birthdayMonths[0].month, birthdayMonths[0].confidence);
+    }
+
+    // Multiple transitions - find consensus
+    const monthCounts = {};
+    birthdayMonths.forEach(bm => {
+        // Count this month and adjacent months
+        for (let offset = -1; offset <= 1; offset++) {
+            const m = (bm.month + offset + 12) % 12;
+            monthCounts[m] = (monthCounts[m] || 0) + (offset === 0 ? 2 : 1);
+        }
+    });
+
+    // Find peak month(s)
+    const maxCount = Math.max(...Object.values(monthCounts));
+    const peakMonths = Object.keys(monthCounts)
+        .filter(m => monthCounts[m] >= maxCount - 1)
+        .map(m => parseInt(m))
+        .sort((a, b) => a - b);
+
+    // Determine confidence based on consistency
+    let confidence;
+    if (peakMonths.length === 1 && birthdayMonths.length >= 2) {
+        confidence = 'High';
+    } else if (peakMonths.length <= 2) {
+        confidence = 'Medium';
+    } else if (peakMonths.length <= 4) {
+        confidence = 'Low';
+    } else {
+        confidence = 'Very Low';
+    }
+
+    return formatBirthdayEstimate(peakMonths, confidence, birthdayTransitions.length);
+}
+
+function estimateBirthdayFromPatterns(sorted, ageSpans) {
+    // If we have long stretches at consistent ages, we can estimate
+    // based on when they would have turned that age
+
+    const longestSpans = [];
+    Object.keys(ageSpans).forEach(age => {
+        const totalDuration = ageSpans[age].reduce((sum, span) => sum + span.duration, 0);
+        const latestEnd = Math.max(...ageSpans[age].map(s => s.end));
+        longestSpans.push({
+            age: parseInt(age),
+            totalDuration,
+            latestEnd
+        });
+    });
+
+    // Sort by duration
+    longestSpans.sort((a, b) => b.totalDuration - a.totalDuration);
+
+    if (longestSpans.length > 0 && longestSpans[0].totalDuration > 180 * 24 * 60 * 60) {
+        // At least 6 months of data at one age
+        // Birthday would be within a year after latestEnd minus age years
+        return {
+            confidence: 'Very Low',
+            reason: 'Estimated from posting duration patterns',
+            estimatedRange: 'Unable to determine specific month range'
+        };
+    }
+
+    return {
+        confidence: 'None',
+        reason: 'No clear birthday pattern detected'
+    };
+}
+
+function formatBirthdayEstimate(monthData, confidence, transitionCount = 1) {
+    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                        'July', 'August', 'September', 'October', 'November', 'December'];
+
+    if (Array.isArray(monthData)) {
+        // Multiple months
+        if (monthData.length === 1) {
+            return {
+                confidence,
+                month: monthNames[monthData[0]],
+                range: monthNames[monthData[0]],
+                transitionCount
+            };
+        } else if (monthData.length === 2) {
+            // Check if adjacent
+            const diff = Math.abs(monthData[0] - monthData[1]);
+            if (diff === 1 || diff === 11) {
+                return {
+                    confidence,
+                    range: `${monthNames[monthData[0]]} - ${monthNames[monthData[1]]}`,
+                    transitionCount
+                };
+            }
+        }
+        // Non-adjacent or multiple months
+        const start = Math.min(...monthData);
+        const end = Math.max(...monthData);
+        return {
+            confidence,
+            range: `${monthNames[start]} - ${monthNames[end]}`,
+            transitionCount
+        };
+    } else {
+        // Single month
+        return {
+            confidence,
+            month: monthNames[monthData],
+            range: monthNames[monthData],
+            transitionCount
+        };
+    }
+}
+
+function estimateCurrentAgeFromPoints(points) {
+    if (points.length === 0) return null;
+
+    const sorted = [...points].sort((a, b) => a.timestamp - b.timestamp);
+    const latest = sorted[sorted.length - 1];
+    const now = Date.now() / 1000;
+    const yearsSince = (now - latest.timestamp) / (365.25 * 24 * 60 * 60);
+
+    // Simple projection from latest known age
+    const estimated = latest.age + yearsSince;
+    return Math.round(estimated * 2) / 2; // Round to 0.5
+}
+
+function calculateConsistencyScore(timelinePoints, backwardsAging) {
+    if (timelinePoints.length < 2) return 100;
+
+    let score = 100;
+
+    // Penalize for backwards aging
+    score -= backwardsAging.length * 15;
+
+    // Check for reasonable progression
+    const sorted = [...timelinePoints].sort((a, b) => a.timestamp - b.timestamp);
+    for (let i = 1; i < sorted.length; i++) {
+        const timeDiff = (sorted[i].timestamp - sorted[i-1].timestamp) / (365.25 * 24 * 60 * 60);
+        const ageDiff = sorted[i].age - sorted[i-1].age;
+
+        if (timeDiff > 0) {
+            const rate = ageDiff / timeDiff;
+            // Penalize for unrealistic aging rates
+            if (rate > 2) score -= 10;
+            if (rate < -0.5) score -= 15;
+        }
+    }
+
+    // Calculate age spread penalty
+    const ages = timelinePoints.map(p => p.age);
+    const spread = Math.max(...ages) - Math.min(...ages);
+    if (spread > 5) score -= (spread - 5) * 5;
+
+    return Math.max(0, Math.min(100, score));
+}
+
+// ============================================================================
+// PAGINATION SUPPORT
+// ============================================================================
+
+function searchUserAgesWithPagination(username, beforeTimestamp = null, limit = 250) {
+    return new Promise((resolve, reject) => {
+        if (!apiToken) {
+            reject(new Error('No API token available'));
+            return;
+        }
+
+        const searchQuery = buildAgeSearchQuery();
+
+        const params = new URLSearchParams();
+        params.append('author', username);
+        params.append('exact_author', 'true');
+        params.append('html_decode', 'True');
+        params.append('q', searchQuery);
+        params.append('size', limit.toString());
+        params.append('sort', 'created_utc');
+        params.append('order', 'desc'); // Newest first, so we can paginate backwards
+
+        if (beforeTimestamp) {
+            params.append('before', beforeTimestamp.toString());
+        }
+
+        const url = `${PUSHSHIFT_API_BASE}/reddit/search/submission/?${params}`;
+
+        logDebug('PushShift pagination request:', { username, beforeTimestamp, limit });
+
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: url,
+            headers: {
+                'Authorization': `Bearer ${apiToken}`
+            },
+            onload: function(response) {
+                if (response.status === 401 || response.status === 403) {
+                    clearToken();
+                    reject(new Error('Token expired or invalid'));
+                    return;
+                }
+
+                if (response.status !== 200) {
+                    reject(new Error(`PushShift API error: ${response.status}`));
+                    return;
+                }
+
+                try {
+                    const data = JSON.parse(response.responseText);
+                    const results = data.data || [];
+                    logDebug(`Pagination returned ${results.length} results`);
+                    resolve(results);
+                } catch (error) {
+                    reject(new Error('Failed to parse API response'));
+                }
+            },
+            onerror: function() {
+                reject(new Error('Network error'));
+            },
+            ontimeout: function() {
+                reject(new Error('Request timed out'));
+            }
+        });
+    });
+}
+
+// ============================================================================
+// AGE HIGHLIGHTING
+// ============================================================================
+
 function highlightAgesInText(text, postedAges, possibleAges) {
     let highlighted = text;
 
@@ -1991,13 +2933,20 @@ function showResultsModal(username, ageData) {
                     anomalyNote = '<br><span style="color: #ff8c42; font-size: 11px;">⚠ Age inconsistencies detected in data</span>';
                 }
 
+                let couplesNote = '';
+                if (ageEstimate.couplesAccount) {
+                    couplesNote = '<br><span style="color: #ff8c42; font-size: 11px;">👥 Couples/Shared Account Detected - see Deep Analysis for details</span>';
+                }
+
                 estimateHTML = `<p style="margin-top: 8px; padding-top: 4px; border-top: 1px solid #343536;">
                     <strong>Estimated Current Age:</strong>
                     <span style="color: ${confidenceColor}; font-weight: bold; font-size: 16px;">${ageEstimate.estimatedAge}</span>
                     <span style="color: #818384; font-size: 12px;"> (${ageEstimate.confidence} Confidence)</span>
+                    ${ageEstimate.couplesAccount ? '<span style="color: #ff8c42; font-size: 12px;"> 👥 Couples Account</span>' : ''}
                     <br>
                     <span style="color: #818384; font-size: 11px;">Based on ${ageEstimate.dataPoints} data point${ageEstimate.dataPoints > 1 ? 's' : ''} spanning ${ageEstimate.yearSpan} year${ageEstimate.yearSpan !== 1 ? 's' : ''}</span>
                     ${anomalyNote}
+                    ${couplesNote}
                 </p>`;
             }
         }
@@ -2113,6 +3062,7 @@ function showResultsModal(username, ageData) {
             ${resultsHTML}
         </div>
         <div class="age-modal-buttons">
+            <button class="age-modal-button deep-analysis">Deep Analysis</button>
             <button class="age-modal-button recheck-age">Recheck Age</button>
             <button class="age-modal-button danger clear-user">Clear This User Cache</button>
             <button class="age-modal-button danger clear-all">Clear All Cache</button>
@@ -2143,6 +3093,7 @@ function showResultsModal(username, ageData) {
     const recheckBtn = modal.querySelector('.recheck-age');
     const clearUserBtn = modal.querySelector('.clear-user');
     const clearAllBtn = modal.querySelector('.clear-all');
+    const deepAnalysisBtn = modal.querySelector('.deep-analysis');
     const ageChips = modal.querySelectorAll('.age-chip');
     const resultItems = modal.querySelectorAll('.age-result-item');
     const filterStatusContainer = modal.querySelector('.age-filter-status-container');
@@ -2190,6 +3141,11 @@ function showResultsModal(username, ageData) {
                 updateButtonForUser(username);
             });
         }
+    };
+
+    deepAnalysisBtn.onclick = () => {
+        const analysis = performDeepAnalysis(ageData, username);
+        showDeepAnalysisModal(username, ageData, analysis);
     };
 
     // Age filter functionality with multi-select support
@@ -2477,6 +3433,653 @@ function showErrorModal(username, error) {
 
     closeBtn.onclick = closeModal;
     closeButton.onclick = closeModal;
+}
+
+function showDeepAnalysisModal(username, ageData, analysis) {
+    const modalId = `age-modal-${modalCounter++}`;
+
+    const modal = document.createElement('div');
+    modal.className = 'age-modal resizable';
+    modal.dataset.modalId = modalId;
+    modal.style.minWidth = '700px';
+    modal.style.width = '900px';
+    modal.style.height = '85vh';
+    modal.style.zIndex = ++zIndexCounter;
+
+    // Store analysis data for pagination
+    modal.dataset.username = username;
+
+    // Build section content
+    const overviewHTML = buildOverviewSection(analysis);
+    const timelineHTML = buildTimelineSection(analysis);
+    const anomaliesHTML = buildAnomaliesSection(analysis);
+    const subredditHTML = buildSubredditSection(analysis);
+    const birthdayHTML = buildBirthdaySection(analysis);
+    const couplesHTML = buildCouplesSection(analysis);
+
+    modal.innerHTML = `
+        <div class="age-modal-header">
+            <div class="age-modal-title-row">
+                <div class="age-modal-title">Deep Analysis: u/${username}</div>
+                <div style="display: flex; align-items: center;">
+                    <button class="age-settings-gear" title="Settings">⚙</button>
+                    <button class="age-modal-close">&times;</button>
+                </div>
+            </div>
+        </div>
+        <div class="age-modal-content">
+            ${overviewHTML}
+            ${anomaliesHTML}
+            ${subredditHTML}
+            ${birthdayHTML}
+            ${couplesHTML}
+            ${timelineHTML}
+
+            <div class="fetch-more-container">
+                <button class="age-modal-button" id="fetch-more-data">Fetch More Data (250 posts)</button>
+                <div class="fetch-more-status">
+                    Currently showing ${analysis.totalPosts} posts with age mentions.
+                    ${analysis.timeline.length > 0 ?
+                        `Oldest post: ${new Date(analysis.timeline[0].timestamp * 1000).toLocaleDateString()}` : ''}
+                </div>
+            </div>
+        </div>
+        <div class="age-modal-buttons">
+            <button class="age-modal-button secondary">Close</button>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    makeDraggable(modal);
+    modal.addEventListener('mousedown', () => {
+        bringToFront(modal);
+        normalizeModalPosition(modal);
+    });
+
+    resultsModals.push({ modalId, modal, overlay: null, username, ageData, analysis });
+
+    // Event handlers
+    const closeBtn = modal.querySelector('.age-modal-close');
+    const closeButton = modal.querySelector('.age-modal-button.secondary');
+    const settingsBtn = modal.querySelector('.age-settings-gear');
+    const fetchMoreBtn = modal.querySelector('#fetch-more-data');
+
+    const closeModal = () => {
+        document.body.removeChild(modal);
+        resultsModals = resultsModals.filter(m => m.modalId !== modalId);
+    };
+
+    closeBtn.onclick = closeModal;
+    closeButton.onclick = closeModal;
+    settingsBtn.onclick = (e) => {
+        e.stopPropagation();
+        showSettingsModal();
+    };
+
+    // Collapsible sections
+    modal.querySelectorAll('.deep-analysis-header').forEach(header => {
+        header.addEventListener('click', () => {
+            const content = header.nextElementSibling;
+            const toggle = header.querySelector('.deep-analysis-toggle');
+            content.classList.toggle('collapsed');
+            toggle.textContent = content.classList.contains('collapsed') ? '▶ Show' : '▼ Hide';
+        });
+    });
+
+    // Fetch more data handler
+    fetchMoreBtn.onclick = async () => {
+        const modalInfo = resultsModals.find(m => m.modalId === modalId);
+        if (!modalInfo) return;
+
+        fetchMoreBtn.disabled = true;
+        fetchMoreBtn.textContent = 'Fetching...';
+
+        try {
+            // Get earliest timestamp from current data
+            const earliestTimestamp = modalInfo.analysis.timeline.length > 0 ?
+                Math.min(...modalInfo.analysis.timeline.map(p => p.timestamp)) :
+                null;
+
+            const newResults = await searchUserAgesWithPagination(username, earliestTimestamp, 250);
+
+            if (newResults.length === 0) {
+                fetchMoreBtn.textContent = 'No More Data Available';
+                return;
+            }
+
+            // Process new results and merge
+            const newAgeData = processResults(newResults, username);
+
+            // Merge with existing data
+            const mergedResults = [...modalInfo.ageData.results];
+            newAgeData.results.forEach(newResult => {
+                // Check for duplicates by permalink
+                if (!mergedResults.some(r => r.permalink === newResult.permalink)) {
+                    mergedResults.push(newResult);
+                }
+            });
+
+            // Update age sets
+            const mergedPostedAges = new Set([...modalInfo.ageData.postedAges, ...newAgeData.postedAges]);
+            const mergedPossibleAges = new Set([...modalInfo.ageData.possibleAges, ...newAgeData.possibleAges]);
+
+            const mergedAgeData = {
+                postedAges: Array.from(mergedPostedAges).sort((a, b) => a - b),
+                possibleAges: Array.from(mergedPossibleAges).sort((a, b) => a - b),
+                results: mergedResults
+            };
+
+            // Update cache
+            setCachedAgeData(username, mergedAgeData);
+
+            // Re-run analysis
+            const newAnalysis = performDeepAnalysis(mergedAgeData, username);
+
+            // Update modal info
+            modalInfo.ageData = mergedAgeData;
+            modalInfo.analysis = newAnalysis;
+
+            // Refresh modal content
+            const content = modal.querySelector('.age-modal-content');
+            content.innerHTML = `
+                ${buildOverviewSection(newAnalysis)}
+                ${buildAnomaliesSection(newAnalysis)}
+                ${buildSubredditSection(newAnalysis)}
+                ${buildBirthdaySection(newAnalysis)}
+                ${buildCouplesSection(newAnalysis)}
+                ${buildTimelineSection(newAnalysis)}
+
+                <div class="fetch-more-container">
+                    <button class="age-modal-button" id="fetch-more-data">Fetch More Data (250 posts)</button>
+                    <div class="fetch-more-status">
+                        Currently showing ${newAnalysis.totalPosts} posts with age mentions.
+                        ${newAnalysis.timeline.length > 0 ?
+                            `Oldest post: ${new Date(newAnalysis.timeline[0].timestamp * 1000).toLocaleDateString()}` : ''}
+                    </div>
+                </div>
+            `;
+
+            // Re-attach event handlers
+            attachDeepAnalysisHandlers(modal, modalId, username);
+
+        } catch (error) {
+            console.error('Fetch more error:', error);
+            fetchMoreBtn.textContent = `Error: ${error.message}`;
+        }
+    };
+}
+
+function attachDeepAnalysisHandlers(modal, modalId, username) {
+    // Collapsible sections
+    modal.querySelectorAll('.deep-analysis-header').forEach(header => {
+        header.addEventListener('click', () => {
+            const content = header.nextElementSibling;
+            const toggle = header.querySelector('.deep-analysis-toggle');
+            content.classList.toggle('collapsed');
+            toggle.textContent = content.classList.contains('collapsed') ? '▶ Show' : '▼ Hide';
+        });
+    });
+
+    // Fetch more button
+    const fetchMoreBtn = modal.querySelector('#fetch-more-data');
+    if (fetchMoreBtn) {
+        fetchMoreBtn.onclick = async () => {
+            const modalInfo = resultsModals.find(m => m.modalId === modalId);
+            if (!modalInfo) return;
+
+            fetchMoreBtn.disabled = true;
+            fetchMoreBtn.textContent = 'Fetching...';
+
+            try {
+                const earliestTimestamp = modalInfo.analysis.timeline.length > 0 ?
+                    Math.min(...modalInfo.analysis.timeline.map(p => p.timestamp)) :
+                    null;
+
+                const newResults = await searchUserAgesWithPagination(username, earliestTimestamp, 250);
+
+                if (newResults.length === 0) {
+                    fetchMoreBtn.textContent = 'No More Data Available';
+                    return;
+                }
+
+                const newAgeData = processResults(newResults, username);
+
+                const mergedResults = [...modalInfo.ageData.results];
+                newAgeData.results.forEach(newResult => {
+                    if (!mergedResults.some(r => r.permalink === newResult.permalink)) {
+                        mergedResults.push(newResult);
+                    }
+                });
+
+                const mergedPostedAges = new Set([...modalInfo.ageData.postedAges, ...newAgeData.postedAges]);
+                const mergedPossibleAges = new Set([...modalInfo.ageData.possibleAges, ...newAgeData.possibleAges]);
+
+                const mergedAgeData = {
+                    postedAges: Array.from(mergedPostedAges).sort((a, b) => a - b),
+                    possibleAges: Array.from(mergedPossibleAges).sort((a, b) => a - b),
+                    results: mergedResults
+                };
+
+                setCachedAgeData(username, mergedAgeData);
+
+                const newAnalysis = performDeepAnalysis(mergedAgeData, username);
+
+                modalInfo.ageData = mergedAgeData;
+                modalInfo.analysis = newAnalysis;
+
+                const content = modal.querySelector('.age-modal-content');
+                content.innerHTML = `
+                    ${buildOverviewSection(newAnalysis)}
+                    ${buildAnomaliesSection(newAnalysis)}
+                    ${buildSubredditSection(newAnalysis)}
+                    ${buildBirthdaySection(newAnalysis)}
+                    ${buildCouplesSection(newAnalysis)}
+                    ${buildTimelineSection(newAnalysis)}
+
+                    <div class="fetch-more-container">
+                        <button class="age-modal-button" id="fetch-more-data">Fetch More Data (250 posts)</button>
+                        <div class="fetch-more-status">
+                            Currently showing ${newAnalysis.totalPosts} posts with age mentions.
+                            ${newAnalysis.timeline.length > 0 ?
+                                `Oldest post: ${new Date(newAnalysis.timeline[0].timestamp * 1000).toLocaleDateString()}` : ''}
+                        </div>
+                    </div>
+                `;
+
+                attachDeepAnalysisHandlers(modal, modalId, username);
+
+            } catch (error) {
+                console.error('Fetch more error:', error);
+                fetchMoreBtn.textContent = `Error: ${error.message}`;
+            }
+        };
+    }
+}
+
+function buildOverviewSection(analysis) {
+    const extremes = analysis.ageExtremes;
+    const consistency = analysis.consistencyScore;
+
+    let consistencyClass = 'success';
+    if (consistency < 50) consistencyClass = 'danger';
+    else if (consistency < 75) consistencyClass = 'warning';
+
+    let extremeWarning = '';
+    if (extremes && extremes.isExtreme) {
+        extremeWarning = `<div class="analysis-stat-row">
+            <span class="analysis-stat-label">⚠ Age Spread Warning</span>
+            <span class="analysis-stat-value danger">${extremes.spread} year spread detected</span>
+        </div>`;
+    }
+
+    // Recent age change
+    let recentChangeHTML = '';
+    if (analysis.recentAgeChange) {
+        const rc = analysis.recentAgeChange;
+        const changeClass = rc.isVeryRecent ? 'warning' : 'info';
+        recentChangeHTML = `<div class="analysis-stat-row">
+            <span class="analysis-stat-label">Recent Age Change</span>
+            <span class="analysis-stat-value ${changeClass}">
+                ${rc.fromAge} → ${rc.toAge} (${rc.daysAgo} days ago)${rc.isVeryRecent ? ' ⚠ Very Recent!' : ''}
+            </span>
+        </div>`;
+    }
+
+    // Couples account indicator
+    let couplesIndicator = '';
+    if (analysis.couplesAnalysis && analysis.couplesAnalysis.isCouplesAccount) {
+        couplesIndicator = `<div class="analysis-stat-row">
+            <span class="analysis-stat-label">Account Type</span>
+            <span class="analysis-stat-value warning">Likely Couples/Shared Account (${analysis.couplesAnalysis.confidence} confidence)</span>
+        </div>`;
+    }
+
+    return `
+        <div class="deep-analysis-section">
+            <div class="deep-analysis-header">
+                <span class="deep-analysis-title">📊 Overview</span>
+                <span class="deep-analysis-toggle">▼ Hide</span>
+            </div>
+            <div class="deep-analysis-content">
+                <div class="analysis-stat-row">
+                    <span class="analysis-stat-label">Posts with Age Mentions</span>
+                    <span class="analysis-stat-value">${analysis.totalPosts}</span>
+                </div>
+                <div class="analysis-stat-row">
+                    <span class="analysis-stat-label">Posted Ages (in brackets)</span>
+                    <span class="analysis-stat-value">${analysis.postedAges.length > 0 ? analysis.postedAges.join(', ') : 'None'}</span>
+                </div>
+                <div class="analysis-stat-row">
+                    <span class="analysis-stat-label">Possible Ages (not bracketed)</span>
+                    <span class="analysis-stat-value">${analysis.possibleAges.length > 0 ? analysis.possibleAges.join(', ') : 'None'}</span>
+                </div>
+                ${extremes ? `
+                <div class="analysis-stat-row">
+                    <span class="analysis-stat-label">Age Range</span>
+                    <span class="analysis-stat-value">${extremes.min} - ${extremes.max} (spread: ${extremes.spread})</span>
+                </div>
+                <div class="analysis-stat-row">
+                    <span class="analysis-stat-label">Mean Age / Std Dev</span>
+                    <span class="analysis-stat-value">${extremes.mean} / ±${extremes.stdDev}</span>
+                </div>
+                ` : ''}
+                <div class="analysis-stat-row">
+                    <span class="analysis-stat-label">Consistency Score</span>
+                    <span class="analysis-stat-value ${consistencyClass}">${consistency}/100</span>
+                </div>
+                ${extremeWarning}
+                ${recentChangeHTML}
+                ${couplesIndicator}
+            </div>
+        </div>
+    `;
+}
+
+function buildAnomaliesSection(analysis) {
+    const backwardsAging = analysis.backwardsAging;
+
+    if (backwardsAging.length === 0) {
+        return `
+            <div class="deep-analysis-section">
+                <div class="deep-analysis-header">
+                    <span class="deep-analysis-title">⚠️ Anomalies & Backwards Aging</span>
+                    <span class="deep-analysis-toggle">▼ Hide</span>
+                </div>
+                <div class="deep-analysis-content">
+                    <p style="color: #46d160;">✓ No backwards aging detected. User ages chronologically.</p>
+                </div>
+            </div>
+        `;
+    }
+
+    const anomaliesHTML = backwardsAging.map(a => `
+        <div class="anomaly-item">
+            <div class="anomaly-description">
+                Age dropped from <strong>${a.fromAge}</strong> to <strong>${a.toAge}</strong>
+                (${a.ageDrop} year${a.ageDrop !== 1 ? 's' : ''} younger)
+            </div>
+            <div class="anomaly-date">
+                ${a.fromDate} (r/${a.fromSubreddit}) → ${a.toDate} (r/${a.toSubreddit})
+                <br>${a.daysBetween} days between posts
+                <a href="${a.permalink}" target="_blank" style="margin-left: 10px; color: #0079d3;">View Post →</a>
+            </div>
+        </div>
+    `).join('');
+
+    return `
+        <div class="deep-analysis-section">
+            <div class="deep-analysis-header">
+                <span class="deep-analysis-title">⚠️ Anomalies & Backwards Aging (${backwardsAging.length} found)</span>
+                <span class="deep-analysis-toggle">▼ Hide</span>
+            </div>
+            <div class="deep-analysis-content">
+                <p style="color: #ff6b6b; margin-bottom: 15px;">
+                    User posted as a younger age AFTER claiming to be older. This could indicate age falsification or a couples account.
+                </p>
+                ${anomaliesHTML}
+            </div>
+        </div>
+    `;
+}
+
+function buildSubredditSection(analysis) {
+    const comparison = analysis.subredditComparison;
+    const trackedSubs = userSettings.trackedSubreddits || [];
+
+    if (trackedSubs.length === 0) {
+        return `
+            <div class="deep-analysis-section">
+                <div class="deep-analysis-header">
+                    <span class="deep-analysis-title">🔍 Subreddit Age Comparison</span>
+                    <span class="deep-analysis-toggle">▼ Hide</span>
+                </div>
+                <div class="deep-analysis-content">
+                    <p style="color: #818384;">No tracked subreddits configured. Add subreddits in Settings to compare age behavior.</p>
+                </div>
+            </div>
+        `;
+    }
+
+    let warningHTML = '';
+    if (comparison.ageDiscrepancy) {
+        if (comparison.onlyOlderOnTracked) {
+            warningHTML = `<p style="color: #ff6b6b; font-weight: bold; margin-bottom: 15px;">
+                ⚠️ USER POSTS OLDER AGES ON YOUR SUBREDDITS!
+                <br>Posts as ${comparison.trackedAgeRange.ages.join(', ')} on tracked subs, but ${comparison.otherAgeRange.ages.join(', ')} elsewhere.
+            </p>`;
+        } else if (comparison.onlyYoungerOnTracked) {
+            warningHTML = `<p style="color: #ff8c42; margin-bottom: 15px;">
+                ⚠️ User posts younger ages on your subreddits.
+                <br>Posts as ${comparison.trackedAgeRange.ages.join(', ')} on tracked subs, but ${comparison.otherAgeRange.ages.join(', ')} elsewhere.
+            </p>`;
+        } else {
+            warningHTML = `<p style="color: #ff8c42; margin-bottom: 15px;">
+                ⚠️ Age discrepancy detected between tracked and other subreddits.
+            </p>`;
+        }
+    }
+
+    const trackedSubsList = Array.from(comparison.tracked.subreddits).map(s => `r/${s}`).join(', ') || 'None';
+    const otherSubsList = Array.from(comparison.other.subreddits).slice(0, 10).map(s => `r/${s}`).join(', ') || 'None';
+
+    return `
+        <div class="deep-analysis-section">
+            <div class="deep-analysis-header">
+                <span class="deep-analysis-title">🔍 Subreddit Age Comparison</span>
+                <span class="deep-analysis-toggle">▼ Hide</span>
+            </div>
+            <div class="deep-analysis-content">
+                ${warningHTML}
+                <table class="subreddit-comparison-table">
+                    <tr>
+                        <th>Category</th>
+                        <th>Ages Posted</th>
+                        <th>Post Count</th>
+                        <th>Subreddits</th>
+                    </tr>
+                    <tr>
+                        <td><strong>Your Tracked Subs</strong></td>
+                        <td>${comparison.trackedAgeRange ? comparison.trackedAgeRange.ages.join(', ') : 'N/A'}</td>
+                        <td>${comparison.tracked.posts.length}</td>
+                        <td style="font-size: 11px;">${trackedSubsList}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Other Subreddits</strong></td>
+                        <td>${comparison.otherAgeRange ? comparison.otherAgeRange.ages.join(', ') : 'N/A'}</td>
+                        <td>${comparison.other.posts.length}</td>
+                        <td style="font-size: 11px;">${otherSubsList}${comparison.other.subreddits.size > 10 ? '...' : ''}</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+    `;
+}
+
+function buildBirthdaySection(analysis) {
+    const birthday = analysis.birthdayEstimate;
+
+    if (!birthday || birthday.confidence === 'None') {
+        return `
+            <div class="deep-analysis-section">
+                <div class="deep-analysis-header">
+                    <span class="deep-analysis-title">🎂 Birthday Estimate</span>
+                    <span class="deep-analysis-toggle">▼ Hide</span>
+                </div>
+                <div class="deep-analysis-content">
+                    <p style="color: #818384;">
+                        ${birthday && birthday.reason ? birthday.reason : 'Unable to estimate birthday from available data.'}
+                    </p>
+                    <p style="color: #818384; font-size: 12px; margin-top: 10px;">
+                        Birthday estimation requires consistent age progression data (ideally seeing a user turn from one age to the next).
+                    </p>
+                </div>
+            </div>
+        `;
+    }
+
+    const confidenceColors = {
+        'High': '#46d160',
+        'Medium': '#ff8c42',
+        'Low': '#ffa500',
+        'Very Low': '#ff6b6b'
+    };
+
+    return `
+        <div class="deep-analysis-section">
+            <div class="deep-analysis-header">
+                <span class="deep-analysis-title">🎂 Birthday Estimate</span>
+                <span class="deep-analysis-toggle">▼ Hide</span>
+            </div>
+            <div class="deep-analysis-content">
+                <div class="birthday-estimate">
+                    <div class="birthday-month-range">${birthday.range}</div>
+                    <div class="birthday-confidence" style="color: ${confidenceColors[birthday.confidence]};">
+                        ${birthday.confidence} Confidence
+                        ${birthday.transitionCount ? `(based on ${birthday.transitionCount} age transition${birthday.transitionCount > 1 ? 's' : ''})` : ''}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function buildCouplesSection(analysis) {
+    const couples = analysis.couplesAnalysis;
+
+    if (!couples || !couples.isCouplesAccount) {
+        return `
+            <div class="deep-analysis-section">
+                <div class="deep-analysis-header">
+                    <span class="deep-analysis-title">👥 Couples Account Detection</span>
+                    <span class="deep-analysis-toggle">▼ Hide</span>
+                </div>
+                <div class="deep-analysis-content">
+                    <p style="color: #46d160;">✓ No couples/shared account pattern detected.</p>
+                    <p style="color: #818384; font-size: 12px; margin-top: 10px;">
+                        ${couples ? couples.explanation : 'Couples detection looks for alternating age patterns suggesting two people share the account.'}
+                    </p>
+                </div>
+            </div>
+        `;
+    }
+
+    const tracksHTML = couples.tracks.map(track => {
+        const ageEstimate = track.currentAgeEstimate ? `~${track.currentAgeEstimate}` : 'Unknown';
+        const birthdayInfo = track.birthdayEstimate && track.birthdayEstimate.confidence !== 'None'
+            ? `Birthday: ${track.birthdayEstimate.range} (${track.birthdayEstimate.confidence})`
+            : 'Birthday: Unable to estimate';
+
+        return `
+            <div class="couples-track">
+                <div class="couples-track-title">${track.name}</div>
+                <div class="analysis-stat-row">
+                    <span class="analysis-stat-label">Age Range</span>
+                    <span class="analysis-stat-value">${track.ageRange.min} - ${track.ageRange.max}</span>
+                </div>
+                <div class="analysis-stat-row">
+                    <span class="analysis-stat-label">Estimated Current Age</span>
+                    <span class="analysis-stat-value">${ageEstimate}</span>
+                </div>
+                <div class="analysis-stat-row">
+                    <span class="analysis-stat-label">${birthdayInfo.split(':')[0]}</span>
+                    <span class="analysis-stat-value">${birthdayInfo.split(':')[1] || 'Unable to estimate'}</span>
+                </div>
+                <div class="analysis-stat-row">
+                    <span class="analysis-stat-label">Post Count</span>
+                    <span class="analysis-stat-value">${track.postCount}</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <div class="deep-analysis-section">
+            <div class="deep-analysis-header">
+                <span class="deep-analysis-title">👥 Couples Account Detection (${couples.confidence} Confidence)</span>
+                <span class="deep-analysis-toggle">▼ Hide</span>
+            </div>
+            <div class="deep-analysis-content">
+                <p style="color: #ff8c42; margin-bottom: 15px;">
+                    ⚠️ ${couples.explanation}
+                    <br>
+                    <span style="font-size: 12px; color: #818384;">
+                        Interleave ratio: ${(couples.interleaveRatio * 100).toFixed(0)}% (higher = more alternating)
+                    </span>
+                </p>
+                ${tracksHTML}
+            </div>
+        </div>
+    `;
+}
+
+function buildTimelineSection(analysis) {
+    if (analysis.timeline.length === 0) {
+        return `
+            <div class="deep-analysis-section">
+                <div class="deep-analysis-header">
+                    <span class="deep-analysis-title">📅 Age Timeline</span>
+                    <span class="deep-analysis-toggle">▼ Hide</span>
+                </div>
+                <div class="deep-analysis-content">
+                    <p style="color: #818384;">No timeline data available.</p>
+                </div>
+            </div>
+        `;
+    }
+
+    // Group by transitions for cleaner display
+    const timelineEntries = [];
+    let prevAge = null;
+
+    // Show most recent 50 entries
+    const displayTimeline = analysis.timeline.slice(-50);
+
+    displayTimeline.forEach((point, idx) => {
+        let entryClass = 'age-same';
+        let changeText = '';
+
+        if (idx === 0 || prevAge === null) {
+            entryClass = 'first-post';
+            changeText = '(First recorded)';
+        } else if (point.age > prevAge) {
+            entryClass = 'age-increase';
+            changeText = `(+${point.age - prevAge} from ${prevAge})`;
+        } else if (point.age < prevAge) {
+            entryClass = 'age-decrease';
+            changeText = `(${point.age - prevAge} from ${prevAge}) ⚠️`;
+        }
+
+        timelineEntries.push(`
+            <div class="timeline-entry ${entryClass}">
+                <span class="timeline-date">${new Date(point.timestamp * 1000).toLocaleDateString('en-US', {
+                    year: 'numeric', month: 'short', day: 'numeric'
+                })}</span>
+                <span class="timeline-age" style="color: ${entryClass === 'age-decrease' ? '#ff6b6b' : '#d7dadc'};">
+                    Age: ${point.age}
+                </span>
+                <span class="timeline-subreddit">r/${point.subreddit}</span>
+                <span class="timeline-change">${changeText}</span>
+            </div>
+        `);
+
+        prevAge = point.age;
+    });
+
+    const hiddenCount = analysis.timeline.length - displayTimeline.length;
+
+    return `
+        <div class="deep-analysis-section">
+            <div class="deep-analysis-header">
+                <span class="deep-analysis-title">📅 Age Timeline (${analysis.timeline.length} entries)</span>
+                <span class="deep-analysis-toggle">▼ Hide</span>
+            </div>
+            <div class="deep-analysis-content">
+                ${hiddenCount > 0 ? `<p style="color: #818384; margin-bottom: 10px; font-size: 12px;">Showing most recent 50 entries. ${hiddenCount} older entries hidden.</p>` : ''}
+                ${timelineEntries.join('')}
+            </div>
+        </div>
+    `;
 }
 
 function showLoadingModal(username) {
