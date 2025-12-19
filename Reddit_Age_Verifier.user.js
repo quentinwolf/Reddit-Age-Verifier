@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.24
+// @version      1.26
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -1656,7 +1656,7 @@ function searchUserAges(username) {
         params.append('exact_author', 'true');  // Exact username match only
         params.append('html_decode', 'True');   // Decode HTML entities
         params.append('q', searchQuery);        // Use q parameter like Chearch (searches all fields)
-        params.append('size', '100');
+        params.append('size', userSettings.paginationLimit);
         params.append('sort', 'created_utc');
 
         const url = `${PUSHSHIFT_API_BASE}/reddit/search/submission/?${params}`;
@@ -2796,23 +2796,34 @@ function estimateBirthday(timelinePoints) {
 
     // Analyze birthday transitions
     if (birthdayTransitions.length === 0) {
-        // Try to estimate from account age and posting patterns
         return estimateBirthdayFromPatterns(sorted, ageSpans);
     }
 
-    // Calculate estimated birthday months from transitions
-    const birthdayMonths = birthdayTransitions.map(t => {
+    // Calculate estimated birthday months AND day ranges from transitions
+    const birthdayEstimates = birthdayTransitions.map(t => {
         // Birthday likely occurred between prevEnd and timestamp
-        // Weight towards the transition timestamp
-        const midpoint = t.prevEnd + (t.gap * 0.3); // Assume birthday is 30% into the gap
-        const date = new Date(midpoint * 1000);
+        const startDate = new Date(t.prevEnd * 1000);
+        const endDate = new Date(t.timestamp * 1000);
+
         return {
-            month: date.getMonth(),
-            year: date.getFullYear(),
-            confidence: t.gap < (30 * 24 * 60 * 60) ? 'High' : // Gap < 30 days
-                        t.gap < (90 * 24 * 60 * 60) ? 'Medium' : 'Low' // Gap < 90 days
+            month: startDate.getMonth(), // Use start of range for month
+            year: startDate.getFullYear(),
+            startDay: startDate.getDate(),
+            endDay: endDate.getDate(),
+            startDate: startDate,
+            endDate: endDate,
+            gapDays: Math.round(t.gap / (24 * 60 * 60)),
+            confidence: t.gap < (30 * 24 * 60 * 60) ? 'High' :
+            t.gap < (90 * 24 * 60 * 60) ? 'Medium' : 'Low'
         };
     });
+
+    // Legacy: keep birthdayMonths for month-level logic
+    const birthdayMonths = birthdayEstimates.map(e => ({
+        month: e.month,
+        year: e.year,
+        confidence: e.confidence
+    }));
 
     if (birthdayMonths.length === 1) {
         return formatBirthdayEstimate(birthdayMonths[0].month, birthdayMonths[0].confidence);
@@ -2831,9 +2842,9 @@ function estimateBirthday(timelinePoints) {
     // Find peak month(s)
     const maxCount = Math.max(...Object.values(monthCounts));
     const peakMonths = Object.keys(monthCounts)
-        .filter(m => monthCounts[m] >= maxCount - 1)
-        .map(m => parseInt(m))
-        .sort((a, b) => a - b);
+    .filter(m => monthCounts[m] >= maxCount - 1)
+    .map(m => parseInt(m))
+    .sort((a, b) => a - b);
 
     // Determine confidence based on consistency
     let confidence;
@@ -2847,7 +2858,70 @@ function estimateBirthday(timelinePoints) {
         confidence = 'Very Low';
     }
 
-    return formatBirthdayEstimate(peakMonths, confidence, birthdayTransitions.length);
+    // Calculate day range if High confidence and enough tight transitions
+    let dayRange = null;
+    if (confidence === 'High' && peakMonths.length === 1) {
+        const targetMonth = peakMonths[0];
+
+        // Get estimates for the target month with gaps < 30 days
+        const tightEstimates = birthdayEstimates.filter(e =>
+                                                        e.month === targetMonth && e.gapDays <= 30
+                                                       );
+
+        if (tightEstimates.length >= 2) {
+            // Find overlapping day ranges
+            const dayRanges = tightEstimates.map(e => ({
+                start: e.startDay,
+                end: e.endDay
+            }));
+
+            // Find the intersection or tight cluster
+            const allDays = new Set();
+            dayRanges.forEach(range => {
+                for (let day = range.start; day <= range.end; day++) {
+                    allDays.add(day);
+                }
+            });
+
+            // Count how many ranges include each day
+            const dayCounts = {};
+            Array.from(allDays).forEach(day => {
+                dayCounts[day] = dayRanges.filter(r =>
+                                                  day >= r.start && day <= r.end
+                                                 ).length;
+            });
+
+            // Find days that appear in multiple ranges (consensus)
+            const threshold = Math.max(2, Math.floor(tightEstimates.length * 0.5));
+            const consensusDays = Object.keys(dayCounts)
+            .filter(d => dayCounts[d] >= threshold)
+            .map(d => parseInt(d))
+            .sort((a, b) => a - b);
+
+            if (consensusDays.length > 0 && consensusDays.length <= 15) {
+                // Use consensus range if it's reasonable (≤15 days)
+                dayRange = {
+                    start: Math.min(...consensusDays),
+                    end: Math.max(...consensusDays),
+                    transitionsUsed: tightEstimates.length
+                };
+            } else if (tightEstimates.length >= 3) {
+                // Fall back to tightest range if we have 3+ transitions
+                const sortedByGap = tightEstimates.sort((a, b) => a.gapDays - b.gapDays);
+                const tightest = sortedByGap[0];
+                if (tightest.gapDays <= 14) {
+                    dayRange = {
+                        start: tightest.startDay,
+                        end: tightest.endDay,
+                        transitionsUsed: 1,
+                        note: 'Based on tightest transition'
+                    };
+                }
+            }
+        }
+    }
+
+    return formatBirthdayEstimate(peakMonths, confidence, birthdayTransitions.length, dayRange);
 }
 
 function estimateBirthdayFromPatterns(sorted, ageSpans) {
@@ -2884,18 +2958,28 @@ function estimateBirthdayFromPatterns(sorted, ageSpans) {
     };
 }
 
-function formatBirthdayEstimate(monthData, confidence, transitionCount = 1) {
+function formatBirthdayEstimate(monthData, confidence, transitionCount = 1, dayRange = null) {
     const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
                         'July', 'August', 'September', 'October', 'November', 'December'];
 
     if (Array.isArray(monthData)) {
         // Multiple months
         if (monthData.length === 1) {
+            let rangeText = monthNames[monthData[0]];
+            if (dayRange && dayRange.start && dayRange.end) {
+                if (dayRange.start === dayRange.end) {
+                    rangeText = `${monthNames[monthData[0]]} ${dayRange.start}`;
+                } else {
+                    rangeText = `${monthNames[monthData[0]]} ${dayRange.start}-${dayRange.end}`;
+                }
+            }
+
             return {
                 confidence,
                 month: monthNames[monthData[0]],
-                range: monthNames[monthData[0]],
-                transitionCount
+                range: rangeText,
+                transitionCount,
+                dayRange: dayRange
             };
         } else if (monthData.length === 2) {
             // Check if adjacent
@@ -4366,6 +4450,12 @@ function buildBirthdaySection(analysis) {
         'Very Low': '#ff6b6b'
     };
 
+    const dayPrecisionNote = birthday.dayRange && birthday.dayRange.transitionsUsed ?
+        `<div style="color: #818384; font-size: 11px; margin-top: 8px;">
+            Day-level precision from ${birthday.dayRange.transitionsUsed} transition${birthday.dayRange.transitionsUsed > 1 ? 's' : ''}
+            ${birthday.dayRange.note ? ` (${birthday.dayRange.note})` : ''}
+        </div>` : '';
+
     return `
         <div class="deep-analysis-section">
             <div class="deep-analysis-header">
@@ -4379,6 +4469,7 @@ function buildBirthdaySection(analysis) {
                         ${birthday.confidence} Confidence
                         ${birthday.transitionCount ? `(based on ${birthday.transitionCount} age transition${birthday.transitionCount > 1 ? 's' : ''})` : ''}
                     </div>
+                    ${dayPrecisionNote}
                 </div>
             </div>
         </div>
