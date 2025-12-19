@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.13
+// @version      1.14
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -833,11 +833,12 @@ function processResults(results, username) {
                 possibleAges: foundAges.possible,
                 allAges: [...foundAges.posted, ...foundAges.possible],
                 date: formattedDate,
+                timestamp: post.created_utc,  // ADD THIS LINE - store raw timestamp
                 subreddit: post.subreddit,
                 snippet: snippet,
                 permalink: `https://reddit.com${post.permalink}`,
                 title: title,
-                selftext: cleanSelftext  // Use cleaned version instead of original
+                selftext: cleanSelftext
             });
         }
     });
@@ -855,16 +856,11 @@ function estimateCurrentAge(ageData) {
 
     ageData.results.forEach(result => {
         if (result.postedAges && result.postedAges.length > 0) {
-            // Parse date string back to timestamp
-            const dateParts = result.date.split('/');
-            let timestamp;
-            if (dateParts.length === 3) {
-                // Assuming MM/DD/YYYY format
-                timestamp = new Date(`${dateParts[2]}-${dateParts[0]}-${dateParts[1]}`).getTime() / 1000;
-            } else {
-                return; // Skip if we can't parse date
+            // Use stored timestamp directly
+            const timestamp = result.timestamp;
+            if (!timestamp) {
+                return; // Skip if no timestamp
             }
-
             result.postedAges.forEach(age => {
                 dataPoints.push({ timestamp, age });
             });
