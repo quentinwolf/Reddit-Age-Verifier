@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.14
+// @version      1.15
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -37,26 +37,149 @@
 // ============================================================================
 
 // Debug Mode
-const debugMode = true; // Set to 'true' for console logs
+let debugMode = true; // Set to 'true' for console logs
 
 // Search configuration
-const MIN_AGE = 10;                // Minimum age to search for
-const MAX_AGE = 70;                // Maximum age to search for
+let MIN_AGE = 10;                // Minimum age to search for
+let MAX_AGE = 70;                // Maximum age to search for
 
-const ENABLE_VERY_LOW_CONFIDENCE = true;  // Show age estimates even with very low confidence
+let ENABLE_VERY_LOW_CONFIDENCE = true;  // Show age estimates even with very low confidence
 
 // Snippet length configuration
-const TITLE_SNIPPET_LENGTH = 150;   // Characters to show for title before truncating
-const BODY_SNIPPET_LENGTH = 300;    // Characters to show for post body before truncating
+let TITLE_SNIPPET_LENGTH = 150;   // Characters to show for title before truncating
+let BODY_SNIPPET_LENGTH = 300;    // Characters to show for post body before truncating
 
 // Cache expiration times
-const CACHE_EXPIRATION = 7 * 24 * 60 * 60 * 1000;      // 1 week for user results
+let CACHE_EXPIRATION = 7 * 24 * 60 * 60 * 1000;      // 1 week for user results
 const TOKEN_EXPIRATION = 24 * 60 * 60 * 1000;          // 24 hours for API token
 
 // PushShift API configuration
 const PUSHSHIFT_API_BASE = "https://api.pushshift.io";
 const PUSHSHIFT_AUTH_URL = "https://auth.pushshift.io/authorize";
 const PUSHSHIFT_TOKEN_URL = "https://api.pushshift.io/signup";
+
+// ============================================================================
+// USER SETTINGS
+// ============================================================================
+
+const DEFAULT_SETTINGS = {
+    debugMode: debugMode,
+    minAge: MIN_AGE,
+    maxAge: MAX_AGE,
+    enableVeryLowConfidence: ENABLE_VERY_LOW_CONFIDENCE,
+    titleSnippetLength: TITLE_SNIPPET_LENGTH,
+    bodySnippetLength: BODY_SNIPPET_LENGTH,
+    cacheExpiration: CACHE_EXPIRATION / (24 * 60 * 60 * 1000), // in days
+    ignoredUsers: [],
+    // Additional features
+    showAgeEstimation: true,
+    defaultSort: 'newest', // 'oldest' or 'newest'
+    autoFilterPosted: false, // auto-filter to show only posted ages
+    commonBots: {
+        AutoModerator: true,
+        RepostSleuthBot: true,
+        sneakpeekbot: true,
+        RemindMeBot: true,
+        MTGCardFetcher: true
+    }
+};
+
+let userSettings = null;
+
+function loadSettings() {
+    const saved = GM_getValue('ageVerifierSettings', null);
+    if (saved) {
+        userSettings = JSON.parse(saved);
+        // Merge with defaults for any missing keys (handles updates to DEFAULT_SETTINGS)
+        userSettings = { ...DEFAULT_SETTINGS, ...userSettings };
+        // Ensure commonBots object exists and has all default bots
+        if (!userSettings.commonBots) {
+            userSettings.commonBots = { ...DEFAULT_SETTINGS.commonBots };
+        } else {
+            userSettings.commonBots = { ...DEFAULT_SETTINGS.commonBots, ...userSettings.commonBots };
+        }
+    } else {
+        userSettings = { ...DEFAULT_SETTINGS };
+    }
+
+    applySettings();
+}
+
+function saveSettings(settings) {
+    userSettings = settings;
+    GM_setValue('ageVerifierSettings', JSON.stringify(settings));
+    applySettings();
+}
+
+function applySettings() {
+    debugMode = userSettings.debugMode;
+    MIN_AGE = userSettings.minAge;
+    MAX_AGE = userSettings.maxAge;
+    ENABLE_VERY_LOW_CONFIDENCE = userSettings.enableVeryLowConfidence;
+    TITLE_SNIPPET_LENGTH = userSettings.titleSnippetLength;
+    BODY_SNIPPET_LENGTH = userSettings.bodySnippetLength;
+    CACHE_EXPIRATION = userSettings.cacheExpiration * 24 * 60 * 60 * 1000; // convert days to ms
+}
+
+function getIgnoredUsersList() {
+    const ignored = new Set(userSettings.ignoredUsers.map(u => u.toLowerCase()));
+
+    // Add common bots if enabled
+    if (userSettings.commonBots) {
+        Object.keys(userSettings.commonBots).forEach(bot => {
+            if (userSettings.commonBots[bot]) {
+                ignored.add(bot.toLowerCase());
+            }
+        });
+    }
+
+    return ignored;
+}
+
+function resetToDefaults() {
+    if (confirm('Reset all settings to defaults? This cannot be undone.')) {
+        userSettings = { ...DEFAULT_SETTINGS };
+        GM_setValue('ageVerifierSettings', JSON.stringify(userSettings));
+        applySettings();
+        return true;
+    }
+    return false;
+}
+
+function exportSettings() {
+    const dataStr = JSON.stringify(userSettings, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'reddit-age-verifier-settings.json';
+    link.click();
+    URL.revokeObjectURL(url);
+}
+
+function importSettings(fileInput) {
+    const file = fileInput.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const imported = JSON.parse(e.target.result);
+            // Validate and merge with defaults
+            const merged = { ...DEFAULT_SETTINGS, ...imported };
+            // Ensure commonBots is properly merged
+            if (imported.commonBots) {
+                merged.commonBots = { ...DEFAULT_SETTINGS.commonBots, ...imported.commonBots };
+            }
+            saveSettings(merged);
+            alert('Settings imported successfully! Please refresh the page for all changes to take effect.');
+        } catch (error) {
+            alert('Failed to import settings. Please ensure the file is valid JSON.');
+            console.error('Import error:', error);
+        }
+    };
+    reader.readAsText(file);
+}
 
 // ============================================================================
 // GLOBAL STATE
@@ -464,6 +587,169 @@ GM_addStyle(`
     .snippet-content {
         word-wrap: break-word;
     }
+
+    /* Settings Modal Specific Styles */
+    .age-settings-section {
+        margin-bottom: 25px;
+        padding-bottom: 20px;
+        border-bottom: 1px solid #343536;
+    }
+
+    .age-settings-section:last-child {
+        border-bottom: none;
+        margin-bottom: 0;
+    }
+
+    .age-settings-section-title {
+        font-size: 16px;
+        font-weight: bold;
+        color: #d7dadc;
+        margin-bottom: 15px;
+    }
+
+    .age-settings-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+        gap: 15px;
+    }
+
+    .age-settings-label {
+        color: #d7dadc;
+        font-size: 13px;
+        flex: 1;
+    }
+
+    .age-settings-input {
+        background-color: #272729;
+        border: 1px solid #343536;
+        border-radius: 4px;
+        color: #d7dadc;
+        padding: 6px 10px;
+        font-size: 13px;
+        width: 80px;
+    }
+
+    .age-settings-input:focus {
+        outline: none;
+        border-color: #0079d3;
+    }
+
+    .age-settings-checkbox {
+        width: 18px;
+        height: 18px;
+        cursor: pointer;
+    }
+
+    .age-settings-textarea {
+        width: 100%;
+        min-height: 100px;
+        background-color: #272729;
+        border: 1px solid #343536;
+        border-radius: 4px;
+        color: #d7dadc;
+        padding: 8px;
+        font-size: 12px;
+        font-family: monospace;
+        resize: vertical;
+    }
+
+    .age-settings-textarea:focus {
+        outline: none;
+        border-color: #0079d3;
+    }
+
+    .age-ignored-users-list {
+        max-height: 150px;
+        overflow-y: auto;
+        background-color: #272729;
+        border: 1px solid #343536;
+        border-radius: 4px;
+        padding: 8px;
+        margin-top: 10px;
+    }
+
+    .age-ignored-user-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 4px 8px;
+        margin-bottom: 4px;
+        background-color: #1a1a1b;
+        border-radius: 3px;
+    }
+
+    .age-ignored-user-name {
+        color: #d7dadc;
+        font-size: 12px;
+        font-family: monospace;
+    }
+
+    .age-ignored-user-remove {
+        background-color: #ea0027;
+        color: white;
+        border: none;
+        border-radius: 3px;
+        padding: 2px 8px;
+        font-size: 11px;
+        cursor: pointer;
+        font-weight: bold;
+    }
+
+    .age-ignored-user-remove:hover {
+        background-color: #c20022;
+    }
+
+    .age-settings-bot-list {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        margin-top: 10px;
+    }
+
+    .age-settings-bot-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .age-settings-bot-label {
+        color: #d7dadc;
+        font-size: 12px;
+        font-family: monospace;
+    }
+
+    .age-settings-buttons-row {
+        display: flex;
+        gap: 10px;
+        margin-top: 15px;
+    }
+
+    .age-settings-gear {
+        background: none;
+        border: none;
+        color: #818384;
+        font-size: 20px;
+        cursor: pointer;
+        padding: 0;
+        width: 30px;
+        height: 30px;
+        line-height: 30px;
+        text-align: center;
+        margin-left: 10px;
+    }
+
+    .age-settings-gear:hover {
+        color: #d7dadc;
+    }
+
+    .age-settings-help-text {
+        color: #818384;
+        font-size: 11px;
+        margin-top: 5px;
+        font-style: italic;
+    }
 `);
 
 // Debug Function to log messages to console if enabled at top of script
@@ -518,8 +804,13 @@ function showTokenModal(pendingUsername = null) {
 
     modal.innerHTML = `
         <div class="age-modal-header">
-            <div class="age-modal-title">PushShift API Token Required</div>
-            <button class="age-modal-close">&times;</button>
+            <div class="age-modal-title-row">
+                <div class="age-modal-title">PushShift API Token Required</div>
+                <div style="display: flex; align-items: center;">
+                    <button class="age-settings-gear" title="Settings">⚙</button>
+                    <button class="age-modal-close">&times;</button>
+                </div>
+            </div>
         </div>
         <div class="age-modal-content">
             <p>This tool requires a PushShift API token to verify user ages.</p>
@@ -549,6 +840,12 @@ function showTokenModal(pendingUsername = null) {
     const cancelBtn = modal.querySelectorAll('.age-modal-button')[1];
     const input = modal.querySelector('.age-token-input');
 
+    const settingsBtn = modal.querySelector('.age-settings-gear');
+    settingsBtn.onclick = (e) => {
+        e.stopPropagation();
+        showSettingsModal();
+    };
+
     const closeModal = () => {
         document.body.removeChild(overlay);
         document.body.removeChild(modal);
@@ -577,6 +874,300 @@ function showTokenModal(pendingUsername = null) {
     };
 
     input.focus();
+}
+
+function showSettingsModal() {
+    const modalId = `age-modal-${modalCounter++}`;
+
+    const modal = document.createElement('div');
+    modal.className = 'age-modal resizable';
+    modal.dataset.modalId = modalId;
+    modal.style.minWidth = '650px';
+    modal.style.width = '700px';
+    modal.style.height = '80vh';
+    modal.style.maxHeight = '700px';
+    modal.style.zIndex = ++zIndexCounter;
+
+    // Build common bots checkboxes
+    const commonBotsHTML = Object.keys(DEFAULT_SETTINGS.commonBots).map(botName => {
+        const isChecked = userSettings.commonBots[botName] ? 'checked' : '';
+        return `
+            <div class="age-settings-bot-item">
+                <input type="checkbox" class="age-settings-checkbox common-bot-checkbox"
+                       data-bot="${botName}" ${isChecked} id="bot-${botName}">
+                <label class="age-settings-bot-label" for="bot-${botName}">${botName}</label>
+            </div>
+        `;
+    }).join('');
+
+    // Build ignored users list
+    const ignoredUsersListHTML = userSettings.ignoredUsers.length > 0
+        ? `<div class="age-ignored-users-list">
+            ${userSettings.ignoredUsers.map(user => `
+                <div class="age-ignored-user-item">
+                    <span class="age-ignored-user-name">${escapeHtml(user)}</span>
+                    <button class="age-ignored-user-remove" data-username="${escapeHtml(user)}">Remove</button>
+                </div>
+            `).join('')}
+           </div>`
+        : '<p class="age-settings-help-text">No ignored users yet.</p>';
+
+    modal.innerHTML = `
+        <div class="age-modal-header">
+            <div class="age-modal-title-row">
+                <div class="age-modal-title">Settings</div>
+                <button class="age-modal-close">&times;</button>
+            </div>
+        </div>
+        <div class="age-modal-content">
+            <!-- General Settings -->
+            <div class="age-settings-section">
+                <div class="age-settings-section-title">General Settings</div>
+
+                <div class="age-settings-row">
+                    <label class="age-settings-label">Enable Debug Mode</label>
+                    <input type="checkbox" class="age-settings-checkbox" id="setting-debug"
+                           ${userSettings.debugMode ? 'checked' : ''}>
+                </div>
+
+                <div class="age-settings-row">
+                    <label class="age-settings-label">Show Age Estimation</label>
+                    <input type="checkbox" class="age-settings-checkbox" id="setting-show-estimation"
+                           ${userSettings.showAgeEstimation ? 'checked' : ''}>
+                </div>
+
+                <div class="age-settings-row">
+                    <label class="age-settings-label">Enable Very Low Confidence Estimates</label>
+                    <input type="checkbox" class="age-settings-checkbox" id="setting-very-low-confidence"
+                           ${userSettings.enableVeryLowConfidence ? 'checked' : ''}>
+                </div>
+
+                <div class="age-settings-row">
+                    <label class="age-settings-label">Auto-Filter to Posted Ages Only</label>
+                    <input type="checkbox" class="age-settings-checkbox" id="setting-auto-filter"
+                           ${userSettings.autoFilterPosted ? 'checked' : ''}>
+                </div>
+
+                <div class="age-settings-row">
+                    <label class="age-settings-label">Default Sort Order</label>
+                    <select class="age-settings-input" id="setting-sort-order" style="width: 120px;">
+                        <option value="oldest" ${userSettings.defaultSort === 'oldest' ? 'selected' : ''}>Oldest First</option>
+                        <option value="newest" ${userSettings.defaultSort === 'newest' ? 'selected' : ''}>Newest First</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Age Range Settings -->
+            <div class="age-settings-section">
+                <div class="age-settings-section-title">Age Search Range</div>
+
+                <div class="age-settings-row">
+                    <label class="age-settings-label">Minimum Age</label>
+                    <input type="number" class="age-settings-input" id="setting-min-age"
+                           value="${userSettings.minAge}" min="1" max="99">
+                </div>
+
+                <div class="age-settings-row">
+                    <label class="age-settings-label">Maximum Age</label>
+                    <input type="number" class="age-settings-input" id="setting-max-age"
+                           value="${userSettings.maxAge}" min="1" max="99">
+                </div>
+            </div>
+
+            <!-- Display Settings -->
+            <div class="age-settings-section">
+                <div class="age-settings-section-title">Display Settings</div>
+
+                <div class="age-settings-row">
+                    <label class="age-settings-label">Title Snippet Length (characters)</label>
+                    <input type="number" class="age-settings-input" id="setting-title-length"
+                           value="${userSettings.titleSnippetLength}" min="50" max="500">
+                </div>
+
+                <div class="age-settings-row">
+                    <label class="age-settings-label">Body Snippet Length (characters)</label>
+                    <input type="number" class="age-settings-input" id="setting-body-length"
+                           value="${userSettings.bodySnippetLength}" min="50" max="1000">
+                </div>
+
+                <div class="age-settings-row">
+                    <label class="age-settings-label">Cache Expiration (days)</label>
+                    <input type="number" class="age-settings-input" id="setting-cache-days"
+                           value="${userSettings.cacheExpiration}" min="1" max="90">
+                </div>
+            </div>
+
+            <!-- Common Bots -->
+            <div class="age-settings-section">
+                <div class="age-settings-section-title">Common Bots to Ignore</div>
+                <p class="age-settings-help-text">Automatically hide age check button for these known bots</p>
+                <div class="age-settings-bot-list">
+                    ${commonBotsHTML}
+                </div>
+            </div>
+
+            <!-- Ignored Users -->
+            <div class="age-settings-section">
+                <div class="age-settings-section-title">Ignored Users</div>
+                <p class="age-settings-help-text">Add usernames (one per line) to never show age check buttons for</p>
+                <textarea class="age-settings-textarea" id="ignored-users-input"
+                          placeholder="username1&#10;username2&#10;username3"></textarea>
+                <div class="age-settings-buttons-row">
+                    <button class="age-modal-button" id="add-ignored-users">Add Users</button>
+                </div>
+                ${ignoredUsersListHTML}
+            </div>
+
+            <!-- Import/Export -->
+            <div class="age-settings-section">
+                <div class="age-settings-section-title">Backup & Restore</div>
+                <div class="age-settings-buttons-row">
+                    <button class="age-modal-button secondary" id="export-settings">Export Settings</button>
+                    <button class="age-modal-button secondary" id="import-settings-btn">Import Settings</button>
+                    <input type="file" id="import-settings-file" accept=".json" style="display: none;">
+                    <button class="age-modal-button danger" id="reset-settings">Reset to Defaults</button>
+                </div>
+            </div>
+        </div>
+        <div class="age-modal-buttons">
+            <button class="age-modal-button" id="save-settings">Save & Apply</button>
+            <button class="age-modal-button secondary" id="cancel-settings">Cancel</button>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    makeDraggable(modal);
+    modal.addEventListener('mousedown', () => {
+        bringToFront(modal);
+        normalizeModalPosition(modal);
+    });
+
+    resultsModals.push({ modalId, modal, overlay: null, username: 'settings' });
+
+    // Event Handlers
+    const closeBtn = modal.querySelector('.age-modal-close');
+    const saveBtn = modal.querySelector('#save-settings');
+    const cancelBtn = modal.querySelector('#cancel-settings');
+    const exportBtn = modal.querySelector('#export-settings');
+    const importBtn = modal.querySelector('#import-settings-btn');
+    const importFile = modal.querySelector('#import-settings-file');
+    const resetBtn = modal.querySelector('#reset-settings');
+    const addUsersBtn = modal.querySelector('#add-ignored-users');
+
+    const closeModal = () => {
+        document.body.removeChild(modal);
+        resultsModals = resultsModals.filter(m => m.modalId !== modalId);
+    };
+
+    closeBtn.onclick = closeModal;
+    cancelBtn.onclick = closeModal;
+
+    saveBtn.onclick = () => {
+        const newSettings = {
+            debugMode: modal.querySelector('#setting-debug').checked,
+            minAge: parseInt(modal.querySelector('#setting-min-age').value),
+            maxAge: parseInt(modal.querySelector('#setting-max-age').value),
+            enableVeryLowConfidence: modal.querySelector('#setting-very-low-confidence').checked,
+            titleSnippetLength: parseInt(modal.querySelector('#setting-title-length').value),
+            bodySnippetLength: parseInt(modal.querySelector('#setting-body-length').value),
+            cacheExpiration: parseInt(modal.querySelector('#setting-cache-days').value),
+            showAgeEstimation: modal.querySelector('#setting-show-estimation').checked,
+            defaultSort: modal.querySelector('#setting-sort-order').value,
+            autoFilterPosted: modal.querySelector('#setting-auto-filter').checked,
+            ignoredUsers: userSettings.ignoredUsers, // Keep existing
+            commonBots: {}
+        };
+
+        // Collect common bots settings
+        modal.querySelectorAll('.common-bot-checkbox').forEach(checkbox => {
+            newSettings.commonBots[checkbox.dataset.bot] = checkbox.checked;
+        });
+
+        saveSettings(newSettings);
+        alert('Settings saved! Please refresh the page for all changes to take effect.');
+        closeModal();
+    };
+
+    exportBtn.onclick = () => {
+        exportSettings();
+    };
+
+    importBtn.onclick = () => {
+        importFile.click();
+    };
+
+    importFile.onchange = () => {
+        importSettings(importFile);
+    };
+
+    resetBtn.onclick = () => {
+        if (resetToDefaults()) {
+            closeModal();
+            alert('Settings reset to defaults! Please refresh the page.');
+        }
+    };
+
+    addUsersBtn.onclick = () => {
+        const textarea = modal.querySelector('#ignored-users-input');
+        const newUsers = textarea.value
+            .split('\n')
+            .map(u => u.trim())
+            .filter(u => u.length > 0)
+            .filter(u => !userSettings.ignoredUsers.includes(u)); // Don't add duplicates
+
+        if (newUsers.length > 0) {
+            userSettings.ignoredUsers.push(...newUsers);
+            textarea.value = '';
+
+            // Rebuild the ignored users list
+            const listContainer = modal.querySelector('.age-ignored-users-list')?.parentElement;
+            if (listContainer) {
+                const oldList = modal.querySelector('.age-ignored-users-list');
+                const oldHelpText = listContainer.querySelector('.age-settings-help-text');
+                if (oldList) oldList.remove();
+                if (oldHelpText) oldHelpText.remove();
+
+                const newListHTML = `<div class="age-ignored-users-list">
+                    ${userSettings.ignoredUsers.map(user => `
+                        <div class="age-ignored-user-item">
+                            <span class="age-ignored-user-name">${escapeHtml(user)}</span>
+                            <button class="age-ignored-user-remove" data-username="${escapeHtml(user)}">Remove</button>
+                        </div>
+                    `).join('')}
+                </div>`;
+
+                listContainer.insertAdjacentHTML('beforeend', newListHTML);
+
+                // Re-attach remove handlers
+                attachRemoveHandlers(modal);
+            }
+        }
+    };
+
+    // Attach remove button handlers
+    function attachRemoveHandlers(modalElement) {
+        modalElement.querySelectorAll('.age-ignored-user-remove').forEach(btn => {
+            btn.onclick = () => {
+                const username = btn.dataset.username;
+                userSettings.ignoredUsers = userSettings.ignoredUsers.filter(u => u !== username);
+                btn.closest('.age-ignored-user-item').remove();
+
+                // If no more users, show help text
+                if (userSettings.ignoredUsers.length === 0) {
+                    const listContainer = modalElement.querySelector('.age-ignored-users-list')?.parentElement;
+                    if (listContainer) {
+                        const list = modalElement.querySelector('.age-ignored-users-list');
+                        if (list) list.remove();
+                        listContainer.insertAdjacentHTML('beforeend',
+                            '<p class="age-settings-help-text">No ignored users yet.</p>');
+                    }
+                }
+            };
+        });
+    }
+
+    attachRemoveHandlers(modal);
 }
 
 // ============================================================================
@@ -1339,7 +1930,7 @@ function showResultsModal(username, ageData) {
         // Calculate estimated current age
         const ageEstimate = estimateCurrentAge(ageData);
         let estimateHTML = '';
-        if (ageEstimate) {
+        if (ageEstimate && userSettings.showAgeEstimation) {
             if (ageEstimate.skipped) {
                 // Show anomaly warning instead of estimate
                 estimateHTML = `<p style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #343536;">
@@ -1390,6 +1981,12 @@ function showResultsModal(username, ageData) {
             <div class="age-filter-status-container"></div>
         </div>
     `;
+
+    // Apply sort order to results before building HTML
+    if (userSettings.defaultSort === 'newest') {
+        results.reverse(); // Reverse to show newest first
+    }
+    // If 'oldest', keep default order (already oldest first from API)
 
     let resultsHTML = '';
     if (results.length > 0) {
@@ -1463,7 +2060,10 @@ function showResultsModal(username, ageData) {
         <div class="age-modal-header">
             <div class="age-modal-title-row">
                 <div class="age-modal-title">Age Verification: u/${username}</div>
-                <button class="age-modal-close">&times;</button>
+                <div style="display: flex; align-items: center;">
+                    <button class="age-settings-gear" title="Settings">⚙</button>
+                    <button class="age-modal-close">&times;</button>
+                </div>
             </div>
             ${topbarHTML}
         </div>
@@ -1506,6 +2106,12 @@ function showResultsModal(username, ageData) {
     const filterStatusContainer = modal.querySelector('.age-filter-status-container');
     const contentContainer = modal.querySelector('.age-modal-content');
 
+    const settingsBtn = modal.querySelector('.age-settings-gear');
+    settingsBtn.onclick = (e) => {
+        e.stopPropagation();
+        showSettingsModal();
+    };
+
     let activeFilter = null;
 
     const closeModal = () => {
@@ -1544,77 +2150,118 @@ function showResultsModal(username, ageData) {
         }
     };
 
-    // Age filter functionality
-    ageChips.forEach(chip => {
-        chip.addEventListener('click', () => {
-            const filterAge = parseInt(chip.dataset.age);
-            const isSwitchingFilter = activeFilter !== null && activeFilter !== filterAge;
+// Age filter functionality with multi-select support
+    let activeFilters = new Set(); // Track multiple active filters
 
-            if (activeFilter === filterAge) {
-                // Clear filter
-                activeFilter = null;
-                chip.classList.remove('active');
-                resultItems.forEach(item => item.classList.remove('hidden'));
-                // Remove filter status if exists
-                if (filterStatusContainer) {
-                    filterStatusContainer.innerHTML = '';
+    function updateFilterDisplay() {
+        const visibleCount = Array.from(resultItems).filter(item => !item.classList.contains('hidden')).length;
+
+        if (activeFilters.size === 0) {
+            // No filters active
+            if (filterStatusContainer) {
+                filterStatusContainer.innerHTML = '';
+            }
+        } else {
+            // Show filter status
+            if (filterStatusContainer) {
+                let filterStatus = filterStatusContainer.querySelector('.age-filter-status');
+                if (!filterStatus) {
+                    filterStatus = document.createElement('div');
+                    filterStatus.className = 'age-filter-status';
+                    filterStatusContainer.appendChild(filterStatus);
                 }
-            } else {
-                // Apply filter
-                activeFilter = filterAge;
+                const agesText = Array.from(activeFilters).sort((a, b) => a - b).join(', ');
+                filterStatus.textContent = `Showing ${visibleCount} posts with age${activeFilters.size > 1 ? 's' : ''} ${agesText}. Click to clear filter.`;
+                filterStatus.onclick = () => {
+                    activeFilters.clear();
+                    ageChips.forEach(c => c.classList.remove('active'));
+                    resultItems.forEach(item => item.classList.remove('hidden'));
+                    filterStatusContainer.innerHTML = '';
+                };
+            }
+        }
+    }
 
-                // Update chip states
-                ageChips.forEach(c => c.classList.remove('active'));
-                chip.classList.add('active');
+    function applyFilters() {
+        if (activeFilters.size === 0) {
+            // No filters - show all
+            resultItems.forEach(item => item.classList.remove('hidden'));
+        } else {
+            // Apply filters - show items matching ANY of the selected ages
+            resultItems.forEach(item => {
+                const postedAges = item.dataset.postedAges ?
+                    item.dataset.postedAges.split(',').map(a => parseInt(a)) : [];
+                const possibleAges = item.dataset.possibleAges ?
+                    item.dataset.possibleAges.split(',').map(a => parseInt(a)) : [];
 
-                // Filter results based on chip type
-                const chipType = chip.dataset.type; // 'posted' or 'possible'
+                let shouldShow = false;
 
-                resultItems.forEach(item => {
-                    let shouldShow = false;
+                // Check each active filter
+                activeFilters.forEach(filterAge => {
+                    // Find the chip type for this age
+                    const chip = Array.from(ageChips).find(c => parseInt(c.dataset.age) === filterAge);
+                    if (chip) {
+                        const chipType = chip.dataset.type;
 
-                    if (chipType === 'posted') {
-                        // Posted age chips: only show if age is in posted ages
-                        const postedAges = item.dataset.postedAges ?
-                            item.dataset.postedAges.split(',').map(a => parseInt(a)) : [];
-                        shouldShow = postedAges.includes(filterAge);
-                    } else if (chipType === 'possible') {
-                        // Possible age chips: show if age is in either posted OR possible
-                        const postedAges = item.dataset.postedAges ?
-                            item.dataset.postedAges.split(',').map(a => parseInt(a)) : [];
-                        const possibleAges = item.dataset.possibleAges ?
-                            item.dataset.possibleAges.split(',').map(a => parseInt(a)) : [];
-                        shouldShow = postedAges.includes(filterAge) || possibleAges.includes(filterAge);
-                    }
-
-                    if (shouldShow) {
-                        item.classList.remove('hidden');
-                    } else {
-                        item.classList.add('hidden');
+                        if (chipType === 'posted') {
+                            // Posted age chips: only show if age is in posted ages
+                            if (postedAges.includes(filterAge)) {
+                                shouldShow = true;
+                            }
+                        } else if (chipType === 'possible') {
+                            // Possible age chips: show if age is in either posted OR possible
+                            if (postedAges.includes(filterAge) || possibleAges.includes(filterAge)) {
+                                shouldShow = true;
+                            }
+                        }
                     }
                 });
 
-                // Add/update filter status message
-                if (filterStatusContainer) {
-                    let filterStatus = filterStatusContainer.querySelector('.age-filter-status');
-                    if (!filterStatus) {
-                        filterStatus = document.createElement('div');
-                        filterStatus.className = 'age-filter-status';
-                        filterStatusContainer.appendChild(filterStatus);
-                    }
-                    const visibleCount = Array.from(resultItems).filter(item => !item.classList.contains('hidden')).length;
-                    filterStatus.textContent = `Showing ${visibleCount} posts with age ${filterAge}. Click to clear filter.`;
-                    filterStatus.onclick = () => {
-                        activeFilter = null;
-                        ageChips.forEach(c => c.classList.remove('active'));
-                        resultItems.forEach(item => item.classList.remove('hidden'));
-                        filterStatusContainer.innerHTML = '';
-                    };
+                if (shouldShow) {
+                    item.classList.remove('hidden');
+                } else {
+                    item.classList.add('hidden');
                 }
+            });
+        }
 
-                if (isSwitchingFilter && contentContainer) {
-                    contentContainer.scrollTo({ top: 0, behavior: 'smooth' });
+        updateFilterDisplay();
+    }
+
+    ageChips.forEach(chip => {
+        chip.addEventListener('click', (e) => {
+            const filterAge = parseInt(chip.dataset.age);
+            const shiftKey = e.shiftKey;
+
+            if (shiftKey) {
+                // Shift-click: Toggle this age in the selection
+                if (activeFilters.has(filterAge)) {
+                    activeFilters.delete(filterAge);
+                    chip.classList.remove('active');
+                } else {
+                    activeFilters.add(filterAge);
+                    chip.classList.add('active');
                 }
+            } else {
+                // Regular click: Select only this age (clear others)
+                if (activeFilters.size === 1 && activeFilters.has(filterAge)) {
+                    // Clicking the only active filter - clear it
+                    activeFilters.clear();
+                    chip.classList.remove('active');
+                } else {
+                    // Clear all other filters and select this one
+                    activeFilters.clear();
+                    ageChips.forEach(c => c.classList.remove('active'));
+                    activeFilters.add(filterAge);
+                    chip.classList.add('active');
+                }
+            }
+
+            applyFilters();
+
+            // Scroll to top if filter changed
+            if (contentContainer && activeFilters.size > 0) {
+                contentContainer.scrollTo({ top: 0, behavior: 'smooth' });
             }
         });
     });
@@ -1662,6 +2309,21 @@ function showResultsModal(username, ageData) {
             }
         });
     });
+
+    // Apply auto-filter if enabled - select ALL posted ages
+    if (userSettings.autoFilterPosted && postedAges.length > 0) {
+        // Select all posted age chips
+        const postedChips = modal.querySelectorAll('.age-chip.posted');
+        postedChips.forEach(chip => {
+            const filterAge = parseInt(chip.dataset.age);
+            activeFilters.add(filterAge);
+            chip.classList.add('active');
+        });
+
+        // Apply the filters
+        applyFilters();
+    }
+
 }
 
 function showErrorModal(username, error) {
@@ -1813,6 +2475,12 @@ async function handleAgeCheck(username) {
 }
 
 function createAgeCheckButton(username) {
+    // Check if user is ignored
+    const ignoredUsers = getIgnoredUsersList();
+    if (ignoredUsers.has(username.toLowerCase())) {
+        return null; // Don't create button for ignored users
+    }
+
     const button = document.createElement('button');
     button.className = 'age-check-button';
     button.dataset.username = username;
@@ -1822,11 +2490,9 @@ function createAgeCheckButton(username) {
         const minAge = Math.min(...cached.postedAges);
         const maxAge = Math.max(...cached.postedAges);
         const ageText = minAge === maxAge ? minAge : `${minAge}-${maxAge}`;
-        //button.textContent = `Age: ${ageText} - Recheck`;
         button.textContent = `Age: ${ageText}`;
         button.classList.add('cached');
     } else if (cached) {
-        //button.textContent = 'No Posted Ages - Recheck';
         button.textContent = 'No Posted Ages';
         button.classList.add('cached');
     } else {
@@ -1883,6 +2549,10 @@ function processOldReddit() {
                 if (!(username in userToButtonNode)) {
                     userToButtonNode[username] = createAgeCheckButton(username);
                 }
+                // Skip if button is null (user is ignored)
+                if (userToButtonNode[username] === null) {
+                    continue;
+                }
                 const button = userToButtonNode[username].cloneNode(true);
                 button.onclick = () => handleAgeCheck(username);
                 insertAfter(button, authorTag);
@@ -1908,6 +2578,12 @@ function processModReddit() {
             userToButtonNode[username] = createAgeCheckButton(username);
         }
 
+        // Skip if button is null (user is ignored)
+        if (userToButtonNode[username] === null) {
+            link.dataset.ageVerifierProcessed = 'true';
+            return;
+        }
+
         const button = userToButtonNode[username].cloneNode(true);
         button.onclick = () => handleAgeCheck(username);
 
@@ -1930,6 +2606,9 @@ function debouncedMainLoop() {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(activeProcessor, 500);
 }
+
+// Load settings first
+loadSettings();
 
 // Load token on startup
 loadToken();
