@@ -77,6 +77,7 @@ const DEFAULT_SETTINGS = {
     autoFilterPosted: false, // auto-filter to show only posted ages
     modalWidth: 800, // default results modal width in pixels
     modalHeight: 900, // default results modal height in pixels
+    paginationLimit: 250,
     trackedSubreddits: [], // subreddits to compare age behavior against
     commonBots: {
         AutoModerator: true,
@@ -1169,6 +1170,12 @@ function showSettingsModal() {
                 </div>
 
                 <div class="age-settings-row">
+                    <label class="age-settings-label">Pagination Fetch Limit</label>
+                    <input type="number" class="age-settings-input" id="setting-pagination-limit"
+                           value="${userSettings.paginationLimit}" min="50" max="1000" step="50">
+                </div>
+
+                <div class="age-settings-row">
                     <label class="age-settings-label">Default Sort Order</label>
                     <select class="age-settings-input" id="setting-sort-order" style="width: 120px;">
                         <option value="oldest" ${userSettings.defaultSort === 'oldest' ? 'selected' : ''}>Oldest First</option>
@@ -1325,6 +1332,7 @@ function showSettingsModal() {
             cacheExpiration: parseInt(modal.querySelector('#setting-cache-days').value),
             modalWidth: parseInt(modal.querySelector('#setting-modal-width').value),
             modalHeight: parseInt(modal.querySelector('#setting-modal-height').value),
+            paginationLimit: parseInt(modal.querySelector('#setting-pagination-limit').value),
             showAgeEstimation: modal.querySelector('#setting-show-estimation').checked,
             defaultSort: modal.querySelector('#setting-sort-order').value,
             autoFilterPosted: modal.querySelector('#setting-auto-filter').checked,
@@ -2869,7 +2877,7 @@ function calculateConsistencyScore(timelinePoints, backwardsAging) {
 // PAGINATION SUPPORT
 // ============================================================================
 
-function searchUserAgesWithPagination(username, beforeTimestamp = null, limit = 500) {
+function searchUserAgesWithPagination(username, beforeTimestamp = null, limit = null) {
     return new Promise((resolve, reject) => {
         if (!apiToken) {
             reject(new Error('No API token available'));
@@ -2877,13 +2885,14 @@ function searchUserAgesWithPagination(username, beforeTimestamp = null, limit = 
         }
 
         const searchQuery = buildAgeSearchQuery();
+        const actualLimit = limit || userSettings.paginationLimit; // Use setting as default
 
         const params = new URLSearchParams();
         params.append('author', username);
         params.append('exact_author', 'true');
         params.append('html_decode', 'True');
         params.append('q', searchQuery);
-        params.append('size', limit.toString());
+        params.append('size', actualLimit.toString());
         params.append('sort', 'created_utc');
         params.append('order', 'desc'); // Newest first, so we can paginate backwards
 
@@ -3714,7 +3723,7 @@ function showDeepAnalysisModal(username, ageData, analysis) {
             </div>
         </div>
         <div class="age-modal-buttons">
-            <button class="age-modal-button" id="fetch-more-data">Fetch More Data (250 posts)</button>
+            <button class="age-modal-button" id="fetch-more-data">Fetch More Data (${userSettings.paginationLimit} posts)</button>
             <button class="age-modal-button secondary">Close</button>
         </div>
     `;
@@ -3771,7 +3780,7 @@ function showDeepAnalysisModal(username, ageData, analysis) {
                 Math.min(...modalInfo.analysis.timeline.map(p => p.timestamp)) :
                 null;
 
-            const newResults = await searchUserAgesWithPagination(username, earliestTimestamp, 250);
+            const newResults = await searchUserAgesWithPagination(username, earliestTimestamp, userSettings.paginationLimit);
 
             if (newResults.length === 0) {
                 fetchMoreBtn.textContent = 'No More Data Available';
@@ -3831,7 +3840,7 @@ function showDeepAnalysisModal(username, ageData, analysis) {
 
             // Reset button state
             fetchMoreBtn.disabled = false;
-            fetchMoreBtn.textContent = 'Fetch More Data (250 posts)';
+            fetchMoreBtn.textContent = `Fetch More Data (${userSettings.paginationLimit} posts)`;
 
             // Re-attach event handlers for collapsible sections
             attachDeepAnalysisHandlers(modal, modalId, username);
@@ -3869,7 +3878,7 @@ function attachDeepAnalysisHandlers(modal, modalId, username) {
                     Math.min(...modalInfo.analysis.timeline.map(p => p.timestamp)) :
                     null;
 
-                const newResults = await searchUserAgesWithPagination(username, earliestTimestamp, 250);
+                const newResults = await searchUserAgesWithPagination(username, earliestTimestamp, userSettings.paginationLimit);
 
                 if (newResults.length === 0) {
                     fetchMoreBtn.textContent = 'No More Data Available';
@@ -3921,7 +3930,7 @@ function attachDeepAnalysisHandlers(modal, modalId, username) {
 
                 // Reset button state
                 fetchMoreBtn.disabled = false;
-                fetchMoreBtn.textContent = 'Fetch More Data (250 posts)';
+                fetchMoreBtn.textContent = `Fetch More Data (${userSettings.paginationLimit} posts)`;
 
                 attachDeepAnalysisHandlers(modal, modalId, username);
 
