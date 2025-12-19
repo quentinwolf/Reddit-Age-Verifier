@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.22
+// @version      1.23
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -3706,7 +3706,6 @@ function showDeepAnalysisModal(username, ageData, analysis) {
             ${timelineHTML}
 
             <div class="fetch-more-container">
-                <button class="age-modal-button" id="fetch-more-data">Fetch More Data (250 posts)</button>
                 <div class="fetch-more-status">
                     Currently showing ${analysis.totalPosts} posts with age mentions.
                     ${analysis.timeline.length > 0 ?
@@ -3715,6 +3714,7 @@ function showDeepAnalysisModal(username, ageData, analysis) {
             </div>
         </div>
         <div class="age-modal-buttons">
+            <button class="age-modal-button" id="fetch-more-data">Fetch More Data (250 posts)</button>
             <button class="age-modal-button secondary">Close</button>
         </div>
     `;
@@ -3821,7 +3821,6 @@ function showDeepAnalysisModal(username, ageData, analysis) {
                 ${buildTimelineSection(newAnalysis)}
 
                 <div class="fetch-more-container">
-                    <button class="age-modal-button" id="fetch-more-data">Fetch More Data (250 posts)</button>
                     <div class="fetch-more-status">
                         Currently showing ${newAnalysis.totalPosts} posts with age mentions.
                         ${newAnalysis.timeline.length > 0 ?
@@ -3830,7 +3829,11 @@ function showDeepAnalysisModal(username, ageData, analysis) {
                 </div>
             `;
 
-            // Re-attach event handlers
+            // Reset button state
+            fetchMoreBtn.disabled = false;
+            fetchMoreBtn.textContent = 'Fetch More Data (250 posts)';
+
+            // Re-attach event handlers for collapsible sections
             attachDeepAnalysisHandlers(modal, modalId, username);
 
         } catch (error) {
@@ -3908,7 +3911,6 @@ function attachDeepAnalysisHandlers(modal, modalId, username) {
                     ${buildTimelineSection(newAnalysis)}
 
                     <div class="fetch-more-container">
-                        <button class="age-modal-button" id="fetch-more-data">Fetch More Data (250 posts)</button>
                         <div class="fetch-more-status">
                             Currently showing ${newAnalysis.totalPosts} posts with age mentions.
                             ${newAnalysis.timeline.length > 0 ?
@@ -3916,6 +3918,10 @@ function attachDeepAnalysisHandlers(modal, modalId, username) {
                         </div>
                     </div>
                 `;
+
+                // Reset button state
+                fetchMoreBtn.disabled = false;
+                fetchMoreBtn.textContent = 'Fetch More Data (250 posts)';
 
                 attachDeepAnalysisHandlers(modal, modalId, username);
 
