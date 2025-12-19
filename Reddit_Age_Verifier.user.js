@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.10
+// @version      1.11
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -59,7 +59,7 @@ const PUSHSHIFT_TOKEN_URL = "https://api.pushshift.io/signup";
 // ============================================================================
 
 const userToButtonNode = {};
-const ageCache = JSON.parse(localStorage.getItem('ageVerifierCache') || '{}');
+const ageCache = JSON.parse(GM_getValue('ageVerifierCache', '{}'));
 let apiToken = null;
 let tokenModal = null;
 let resultsModals = []; // Array to track multiple result modals
@@ -454,7 +454,7 @@ function logDebug(...args) {
 // ============================================================================
 
 function loadToken() {
-    const tokenData = JSON.parse(localStorage.getItem('pushShiftToken') || 'null');
+    const tokenData = JSON.parse(GM_getValue('pushShiftToken', 'null'));
     if (tokenData && Date.now() - tokenData.timestamp < TOKEN_EXPIRATION) {
         apiToken = tokenData.token;
         logDebug("Age Verifier: Using cached token");
@@ -464,7 +464,7 @@ function loadToken() {
 }
 
 function saveToken(token) {
-    localStorage.setItem('pushShiftToken', JSON.stringify({
+    GM_setValue('pushShiftToken', JSON.stringify({
         token: token,
         timestamp: Date.now()
     }));
@@ -472,7 +472,7 @@ function saveToken(token) {
 }
 
 function clearToken() {
-    localStorage.removeItem('pushShiftToken');
+    GM_setValue('pushShiftToken', 'null');
     apiToken = null;
 }
 
@@ -572,16 +572,16 @@ function setCachedAgeData(username, data) {
         data: data,
         timestamp: Date.now()
     };
-    localStorage.setItem('ageVerifierCache', JSON.stringify(ageCache));
+    GM_setValue('ageVerifierCache', JSON.stringify(ageCache));
 }
 
 function clearUserCache(username) {
     delete ageCache[username];
-    localStorage.setItem('ageVerifierCache', JSON.stringify(ageCache));
+    GM_setValue('ageVerifierCache', JSON.stringify(ageCache));
 }
 
 function clearAllCache() {
-    localStorage.setItem('ageVerifierCache', '{}');
+    GM_setValue('ageVerifierCache', '{}');
     Object.keys(ageCache).forEach(key => delete ageCache[key]);
 }
 
@@ -838,36 +838,9 @@ function estimateCurrentAge(ageData) {
         }
     }
 
-    // If there's a major jump, this is likely falsified data, not a couples account
-    if (hasMajorJump) {
-        logDebug('Major age jump detected - likely falsified data');
-
-        // If most data is after the jump, skip estimation entirely but return anomaly info
-        if (anomalies.length > 0 && anomalies[0].index < dataPoints.length / 2) {
-            logDebug('Jump is early in timeline, skipping estimation');
-            return {
-                skipped: true,
-                reason: 'major_jump',
-                anomalies: anomalies,
-                message: `Major age jump detected (${anomalies[0].fromAge} → ${anomalies[0].toAge} in ${anomalies[0].years.toFixed(1)} years). Unable to estimate current age.`
-            };
-        }
-    }
-
-    // If more than 30% of transitions are anomalies, skip estimation
-    if (dataPoints.length > 1 && anomalies.length / (dataPoints.length - 1) > 0.3) {
-        logDebug('Too many anomalies detected, skipping estimation');
-        return {
-            skipped: true,
-            reason: 'too_many_anomalies',
-            anomalies: anomalies,
-            message: `Too many age inconsistencies detected (${anomalies.length} anomalies in ${dataPoints.length} points). Unable to estimate current age.`
-        };
-    }
-
-    // Try to detect couples account (two distinct age tracks that ALTERNATE)
+    // Try to detect couples account FIRST (before bailing on anomalies)
     let isCouplesAccount = false;
-    if (dataPoints.length >= 6 && anomalies.length > 0 && !hasMajorJump) {
+    if (dataPoints.length >= 4 && anomalies.length > 0) {  // Lowered from 6 to 4, removed !hasMajorJump check
         // Group ages into clusters (within 4 years of each other)
         const clusters = [];
         dataPoints.forEach((point, idx) => {
@@ -922,6 +895,37 @@ function estimateCurrentAge(ageData) {
             } else {
                 logDebug(`Not couples account - interleave ratio too low: ${interleaveRatio.toFixed(2)}`);
             }
+        }
+    }
+
+    // After couples detection, check if we should skip estimation
+    // Only skip if NOT a couples account and we have major issues
+    if (!isCouplesAccount) {
+        // If there's a major jump in non-couples account, likely falsified data
+        if (hasMajorJump) {
+            logDebug('Major age jump detected in non-couples account - likely falsified data');
+
+            // If most data is after the jump, skip estimation entirely
+            if (anomalies.length > 0 && anomalies[0].index < dataPoints.length / 2) {
+                logDebug('Jump is early in timeline, skipping estimation');
+                return {
+                    skipped: true,
+                    reason: 'major_jump',
+                    anomalies: anomalies,
+                    message: `Major age jump detected (${anomalies[0].fromAge} → ${anomalies[0].toAge} in ${anomalies[0].years.toFixed(1)} years). Unable to estimate current age.`
+                };
+            }
+        }
+
+        // If more than 30% of transitions are anomalies in non-couples account, skip
+        if (dataPoints.length > 1 && anomalies.length / (dataPoints.length - 1) > 0.3) {
+            logDebug('Too many anomalies detected, skipping estimation');
+            return {
+                skipped: true,
+                reason: 'too_many_anomalies',
+                anomalies: anomalies,
+                message: `Too many age inconsistencies detected (${anomalies.length} anomalies in ${dataPoints.length} points). Unable to estimate current age.`
+            };
         }
     }
 
