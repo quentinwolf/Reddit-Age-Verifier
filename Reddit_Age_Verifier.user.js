@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.27
+// @version      1.28
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -2770,12 +2770,24 @@ function estimateBirthday(timelinePoints) {
 
             // Check if this is a +1 transition
             if (sorted[i].age === currentAge + 1) {
-                birthdayTransitions.push({
-                    age: sorted[i].age,
-                    timestamp: sorted[i].timestamp,
-                    prevEnd: sorted[i - 1].timestamp,
-                    gap: sorted[i].timestamp - sorted[i - 1].timestamp
-                });
+                // Calculate how long they stayed at the NEW age
+                let newAgeSpan = 0;
+                for (let j = i; j < sorted.length && sorted[j].age === sorted[i].age; j++) {
+                    newAgeSpan = sorted[j].timestamp - sorted[i].timestamp;
+                }
+
+                // Only count as birthday if they stayed at new age for 7+ days
+                // (filters out 0-day typos but allows real birthdays)
+                const MIN_AGE_DURATION = 7 * 24 * 60 * 60; // 7 days
+                if (newAgeSpan >= MIN_AGE_DURATION || i === sorted.length - 1) {
+                    // Also accept if this is their current/latest age
+                    birthdayTransitions.push({
+                        age: sorted[i].age,
+                        timestamp: sorted[i].timestamp,
+                        prevEnd: sorted[i - 1].timestamp,
+                        gap: sorted[i].timestamp - sorted[i - 1].timestamp
+                    });
+                }
             }
 
             currentAge = sorted[i].age;
