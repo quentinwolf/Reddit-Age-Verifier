@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.26
+// @version      1.27
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -189,7 +189,6 @@ function importSettings(fileInput) {
 // GLOBAL STATE
 // ============================================================================
 
-const userToButtonNode = {};
 const ageCache = JSON.parse(GM_getValue('ageVerifierCache', '{}'));
 let apiToken = null;
 let tokenModal = null;
@@ -4823,15 +4822,11 @@ function processOldReddit() {
             const authorTag = taglines[i].getElementsByClassName('author')[0];
             if (authorTag != null) {
                 const username = authorTag.innerHTML;
-                if (!(username in userToButtonNode)) {
-                    userToButtonNode[username] = createAgeCheckButton(username);
-                }
+                const button = createAgeCheckButton(username);
                 // Skip if button is null (user is ignored)
-                if (userToButtonNode[username] === null) {
+                if (button === null) {
                     continue;
                 }
-                const button = userToButtonNode[username].cloneNode(true);
-                button.onclick = () => handleAgeCheck(username);
                 insertAfter(button, authorTag);
             }
         }
@@ -4851,18 +4846,13 @@ function processModReddit() {
             return;
         }
 
-        if (!(username in userToButtonNode)) {
-            userToButtonNode[username] = createAgeCheckButton(username);
-        }
+        const button = createAgeCheckButton(username);
 
         // Skip if button is null (user is ignored)
-        if (userToButtonNode[username] === null) {
+        if (button === null) {
             link.dataset.ageVerifierProcessed = 'true';
             return;
         }
-
-        const button = userToButtonNode[username].cloneNode(true);
-        button.onclick = () => handleAgeCheck(username);
 
         if (link.parentElement) {
             insertAfter(button, link);
