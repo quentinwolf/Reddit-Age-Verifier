@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.11
+// @version      1.12
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -44,6 +44,10 @@ const MIN_AGE = 10;                // Minimum age to search for
 const MAX_AGE = 70;                // Maximum age to search for
 
 const ENABLE_VERY_LOW_CONFIDENCE = true;  // Show age estimates even with very low confidence
+
+// Snippet length configuration
+const TITLE_SNIPPET_LENGTH = 150;   // Characters to show for title before truncating
+const BODY_SNIPPET_LENGTH = 300;    // Characters to show for post body before truncating
 
 // Cache expiration times
 const CACHE_EXPIRATION = 7 * 24 * 60 * 60 * 1000;      // 1 week for user results
@@ -349,7 +353,7 @@ GM_addStyle(`
 
     .age-result-subreddit {
         color: #0079d3;
-        font-weight: bold;
+        font-weight: normal;
     }
 
     .age-result-snippet {
@@ -439,6 +443,26 @@ GM_addStyle(`
     .highlight-age.possible {
         background-color: #ff8c42;
         color: white;
+    }
+
+    .expand-link,
+    .collapse-link {
+        color: #0079d3;
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: bold;
+        text-decoration: none;
+        user-select: none;
+    }
+
+    .expand-link:hover,
+    .collapse-link:hover {
+        color: #005ba1;
+        text-decoration: underline;
+    }
+
+    .snippet-content {
+        word-wrap: break-word;
     }
 `);
 
@@ -759,15 +783,33 @@ function processResults(results, username) {
                 snippet = snippet.substring(0, 200) + '...';
             }
 
+            // Format date with day of week, 12-hour time, and timezone
+            const postDate = new Date(post.created_utc * 1000);
+            const options = {
+                weekday: 'short',
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: true,
+                timeZoneName: 'longOffset'
+            };
+            const formattedDate = postDate.toLocaleString('en-US', options)
+                .replace(/GMT/, '- GMT')
+                .replace(/,/g, '');
+
             ageData.results.push({
                 postedAges: foundAges.posted,
                 possibleAges: foundAges.possible,
                 allAges: [...foundAges.posted, ...foundAges.possible], // Combined for filtering
-                date: new Date(post.created_utc * 1000).toLocaleDateString(),
+                date: formattedDate,
                 subreddit: post.subreddit,
                 snippet: snippet,
                 permalink: `https://reddit.com${post.permalink}`,
-                title: title
+                title: title,
+                selftext: selftext || ''
             });
         }
     });
@@ -1201,6 +1243,12 @@ function makeDraggable(modal) {
 // RESULTS MODAL
 // ============================================================================
 
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
 function showResultsModal(username, ageData) {
     const modalId = `age-modal-${modalCounter++}`;
 
@@ -1323,7 +1371,6 @@ function showResultsModal(username, ageData) {
     if (results.length > 0) {
         resultsHTML = '<div class="age-results-container">';
         results.forEach((result, index) => {
-            const highlightedSnippet = highlightAgesInText(result.snippet, result.postedAges, result.possibleAges);
             const postedBadge = result.postedAges.length > 0
                 ? `<span style="color: #46d160;">✓ ${result.postedAges.join(', ')}</span>`
                 : '';
@@ -1331,17 +1378,56 @@ function showResultsModal(username, ageData) {
                 ? `<span style="color: #818384;">? ${result.possibleAges.join(', ')}</span>`
                 : '';
 
+            // Process title
+            const titleNeedsTruncation = result.title.length > TITLE_SNIPPET_LENGTH;
+            const displayTitle = titleNeedsTruncation
+                ? result.title.substring(0, TITLE_SNIPPET_LENGTH)
+                : result.title;
+            const highlightedTitle = highlightAgesInText(displayTitle, result.postedAges, result.possibleAges);
+
+            const titleExpandLink = titleNeedsTruncation
+                ? `<span class="expand-link" data-target="title-${index}"> [ Expand ]</span>`
+                : '';
+            const titleCollapseLink = titleNeedsTruncation
+                ? `<span class="collapse-link" data-target="title-${index}" style="display: none;"> [ Collapse ]</span>`
+                : '';
+
+            // Process body (selftext)
+            let bodyHTML = '';
+            if (result.selftext && result.selftext.trim().length > 0) {
+                const bodyNeedsTruncation = result.selftext.length > BODY_SNIPPET_LENGTH;
+                const displayBody = bodyNeedsTruncation
+                    ? result.selftext.substring(0, BODY_SNIPPET_LENGTH)
+                    : result.selftext;
+                const highlightedBody = highlightAgesInText(displayBody, result.postedAges, result.possibleAges);
+
+                const bodyExpandLink = bodyNeedsTruncation
+                    ? `<span class="expand-link" data-target="body-${index}"> [ Expand ]</span>`
+                    : '';
+                const bodyCollapseLink = bodyNeedsTruncation
+                    ? `<span class="collapse-link" data-target="body-${index}" style="display: none;"> [ Collapse ]</span>`
+                    : '';
+
+                bodyHTML = `
+                    <div class="age-result-snippet">
+                        <span class="snippet-content" data-id="body-${index}" data-full="${escapeHtml(result.selftext)}">${highlightedBody}</span>${bodyExpandLink}${bodyCollapseLink}
+                    </div>
+                `;
+            }
+
             resultsHTML += `
                 <div class="age-result-item" data-index="${index}"
                      data-posted-ages="${result.postedAges.join(',')}"
                      data-possible-ages="${result.possibleAges.join(',')}"
                      data-all-ages="${result.allAges.join(',')}">
                     <div class="age-result-header">
-                        <span class="age-result-age">Age: ${postedBadge} ${possibleBadge}</span>
+                        <span class="age-result-age">Age: ${postedBadge} ${possibleBadge} · <span class="age-result-subreddit"><a href='https://old.reddit.com/r/${result.subreddit}' target='_blank'>r/${result.subreddit}</a></span></span>
                         <span class="age-result-date">${result.date}</span>
                     </div>
-                    <div class="age-result-subreddit">r/${result.subreddit}</div>
-                    <div class="age-result-snippet">${highlightedSnippet}</div>
+                    <div class="age-result-snippet" style="font-weight: 500; margin-bottom: ${bodyHTML ? '8px' : '0'};">
+                        <span class="snippet-content" data-id="title-${index}" data-full="${escapeHtml(result.title)}">${highlightedTitle}</span>${titleExpandLink}${titleCollapseLink}
+                    </div>
+                    ${bodyHTML}
                     <a href="${result.permalink}" target="_blank" class="age-result-link">View Post →</a>
                 </div>
             `;
@@ -1505,6 +1591,50 @@ function showResultsModal(username, ageData) {
                 if (isSwitchingFilter && contentContainer) {
                     contentContainer.scrollTo({ top: 0, behavior: 'smooth' });
                 }
+            }
+        });
+    });
+
+    // Expand/collapse functionality
+    const expandLinks = modal.querySelectorAll('.expand-link');
+    const collapseLinks = modal.querySelectorAll('.collapse-link');
+
+    expandLinks.forEach(link => {
+        link.addEventListener('click', (e) => {
+            const targetId = link.dataset.target;
+            const contentSpan = modal.querySelector(`.snippet-content[data-id="${targetId}"]`);
+            const collapseLink = modal.querySelector(`.collapse-link[data-target="${targetId}"]`);
+
+            if (contentSpan && collapseLink) {
+                const fullText = contentSpan.dataset.full;
+                const postedAges = contentSpan.closest('.age-result-item').dataset.postedAges.split(',').filter(Boolean).map(Number);
+                const possibleAges = contentSpan.closest('.age-result-item').dataset.possibleAges.split(',').filter(Boolean).map(Number);
+
+                contentSpan.innerHTML = highlightAgesInText(fullText, postedAges, possibleAges);
+                link.style.display = 'none';
+                collapseLink.style.display = 'inline';
+            }
+        });
+    });
+
+    collapseLinks.forEach(link => {
+        link.addEventListener('click', (e) => {
+            const targetId = link.dataset.target;
+            const contentSpan = modal.querySelector(`.snippet-content[data-id="${targetId}"]`);
+            const expandLink = modal.querySelector(`.expand-link[data-target="${targetId}"]`);
+
+            if (contentSpan && expandLink) {
+                const fullText = contentSpan.dataset.full;
+                const postedAges = contentSpan.closest('.age-result-item').dataset.postedAges.split(',').filter(Boolean).map(Number);
+                const possibleAges = contentSpan.closest('.age-result-item').dataset.possibleAges.split(',').filter(Boolean).map(Number);
+
+                const isTitle = targetId.startsWith('title-');
+                const maxLength = isTitle ? TITLE_SNIPPET_LENGTH : BODY_SNIPPET_LENGTH;
+                const truncated = fullText.substring(0, maxLength);
+
+                contentSpan.innerHTML = highlightAgesInText(truncated, postedAges, possibleAges);
+                link.style.display = 'none';
+                expandLink.style.display = 'inline';
             }
         });
     });
