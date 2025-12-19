@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.21
+// @version      1.22
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -2306,11 +2306,13 @@ function detectCouplesAccountEnhanced(timelinePoints) {
         confidence: 'None',
         tracks: [],
         interleaveRatio: 0,
-        explanation: ''
+        ageGapConsistency: 0,
+        explanation: '',
+        detectionMethod: null
     };
 
-    if (timelinePoints.length < 6) {
-        result.explanation = 'Not enough data points to detect couples account';
+    if (timelinePoints.length < 4) {
+        result.explanation = 'Not enough data points to detect couples account (need at least 4)';
         return result;
     }
 
@@ -2331,8 +2333,8 @@ function detectCouplesAccountEnhanced(timelinePoints) {
         }
     });
 
-    // Need exactly 2 substantial clusters
-    const substantialClusters = clusters.filter(c => c.length >= 3);
+    // Need exactly 2 clusters (can be small if age gap is significant)
+    const substantialClusters = clusters.filter(c => c.length >= 2);
     if (substantialClusters.length !== 2) {
         result.explanation = `Found ${substantialClusters.length} age clusters (need exactly 2 for couples detection)`;
         return result;
@@ -2341,10 +2343,22 @@ function detectCouplesAccountEnhanced(timelinePoints) {
     const cluster1 = substantialClusters[0];
     const cluster2 = substantialClusters[1];
 
-    // Calculate interleave score
+    // Calculate basic cluster stats
+    const track1Ages = cluster1.map(p => p.age);
+    const track2Ages = cluster2.map(p => p.age);
+    const track1Avg = track1Ages.reduce((a, b) => a + b, 0) / track1Ages.length;
+    const track2Avg = track2Ages.reduce((a, b) => a + b, 0) / track2Ages.length;
+    const avgAgeGap = Math.abs(track1Avg - track2Avg);
+
+    // If age gap is less than 10 years, unlikely to be couples (could just be inconsistent posting)
+    if (avgAgeGap < 10) {
+        result.explanation = `Age gap between clusters (${avgAgeGap.toFixed(1)} years) too small for couples detection`;
+        return result;
+    }
+
+    // Calculate interleave score (original method)
     const cluster1Indices = new Set(cluster1.map(p => p.originalIndex));
     let interleaveScore = 0;
-
     for (let i = 0; i < timelinePoints.length - 1; i++) {
         const isInCluster1 = cluster1Indices.has(i);
         const nextIsInCluster1 = cluster1Indices.has(i + 1);
@@ -2352,26 +2366,80 @@ function detectCouplesAccountEnhanced(timelinePoints) {
             interleaveScore++;
         }
     }
-
     result.interleaveRatio = interleaveScore / (timelinePoints.length - 1);
 
-    // If interleave ratio is above threshold, likely couples account
+    // NEW METHOD: Check if both clusters age appropriately over time
+    // This catches couples where one person posts rarely
+    const ageProgressionAnalysis = analyzeClusterAgeProgression(cluster1, cluster2);
+    result.ageGapConsistency = ageProgressionAnalysis.gapConsistency;
+
+    // Determine if this is a couples account using multiple signals
+    let couplesScore = 0;
+    let detectionReasons = [];
+
+    // Signal 1: High interleave ratio (alternating posts)
     if (result.interleaveRatio >= 0.35) {
+        couplesScore += 40;
+        detectionReasons.push(`alternating posts (${(result.interleaveRatio * 100).toFixed(0)}% interleave)`);
+    } else if (result.interleaveRatio >= 0.20) {
+        couplesScore += 20;
+        detectionReasons.push(`some alternation (${(result.interleaveRatio * 100).toFixed(0)}% interleave)`);
+    }
+
+    // Signal 2: Large, consistent age gap
+    if (avgAgeGap >= 15) {
+        couplesScore += 25;
+        detectionReasons.push(`large age gap (${avgAgeGap.toFixed(0)} years)`);
+    } else if (avgAgeGap >= 10) {
+        couplesScore += 15;
+        detectionReasons.push(`significant age gap (${avgAgeGap.toFixed(0)} years)`);
+    }
+
+    // Signal 3: Both clusters show appropriate age progression
+    if (ageProgressionAnalysis.bothProgress) {
+        couplesScore += 35;
+        detectionReasons.push('both ages progress over time');
+    } else if (ageProgressionAnalysis.oneProgresses) {
+        couplesScore += 15;
+        detectionReasons.push('one age track progresses');
+    }
+
+    // Signal 4: Age gap remains consistent over time
+    if (ageProgressionAnalysis.gapConsistency >= 0.8) {
+        couplesScore += 25;
+        detectionReasons.push(`consistent gap (${(ageProgressionAnalysis.gapConsistency * 100).toFixed(0)}%)`);
+    } else if (ageProgressionAnalysis.gapConsistency >= 0.6) {
+        couplesScore += 15;
+        detectionReasons.push(`fairly consistent gap (${(ageProgressionAnalysis.gapConsistency * 100).toFixed(0)}%)`);
+    }
+
+    // Signal 5: Multiple data points in each cluster
+    const minClusterSize = Math.min(cluster1.length, cluster2.length);
+    const totalPoints = cluster1.length + cluster2.length;
+    if (minClusterSize >= 3 && totalPoints >= 8) {
+        couplesScore += 15;
+        detectionReasons.push(`good data coverage (${totalPoints} points)`);
+    } else if (minClusterSize >= 2 && totalPoints >= 5) {
+        couplesScore += 10;
+        detectionReasons.push(`adequate data (${totalPoints} points)`);
+    }
+
+    // Determine if couples account based on score
+    if (couplesScore >= 50) {
         result.isCouplesAccount = true;
 
         // Determine confidence
-        if (result.interleaveRatio >= 0.6 && cluster1.length >= 5 && cluster2.length >= 5) {
+        if (couplesScore >= 90) {
             result.confidence = 'High';
-        } else if (result.interleaveRatio >= 0.45) {
+        } else if (couplesScore >= 70) {
             result.confidence = 'Medium';
         } else {
             result.confidence = 'Low';
         }
 
-        // Build track information
-        const track1Ages = cluster1.map(p => p.age);
-        const track2Ages = cluster2.map(p => p.age);
+        result.detectionMethod = detectionReasons.join(', ');
 
+        // Build track information
         result.tracks = [
             {
                 name: 'Person A',
@@ -2380,7 +2448,8 @@ function detectCouplesAccountEnhanced(timelinePoints) {
                     min: Math.min(...track1Ages),
                     max: Math.max(...track1Ages)
                 },
-                postCount: cluster1.length
+                postCount: cluster1.length,
+                ageProgression: ageProgressionAnalysis.track1Progression
             },
             {
                 name: 'Person B',
@@ -2389,7 +2458,8 @@ function detectCouplesAccountEnhanced(timelinePoints) {
                     min: Math.min(...track2Ages),
                     max: Math.max(...track2Ages)
                 },
-                postCount: cluster2.length
+                postCount: cluster2.length,
+                ageProgression: ageProgressionAnalysis.track2Progression
             }
         ];
 
@@ -2398,12 +2468,172 @@ function detectCouplesAccountEnhanced(timelinePoints) {
         result.tracks[0].name = 'Person A (older)';
         result.tracks[1].name = 'Person B (younger)';
 
-        result.explanation = `Detected alternating age patterns suggesting two people sharing this account`;
+        result.explanation = `Couples account detected: ${detectionReasons.join(', ')}`;
     } else {
-        result.explanation = `Interleave ratio (${(result.interleaveRatio * 100).toFixed(0)}%) too low for couples detection`;
+        result.explanation = `Couples score ${couplesScore}/100 (need 50+). Signals: ${detectionReasons.length > 0 ? detectionReasons.join(', ') : 'none detected'}`;
     }
 
+    logDebug('Couples detection:', {
+        couplesScore,
+        avgAgeGap,
+        interleaveRatio: result.interleaveRatio,
+        gapConsistency: ageProgressionAnalysis.gapConsistency,
+        bothProgress: ageProgressionAnalysis.bothProgress,
+        detectionReasons
+    });
+
     return result;
+}
+
+function analyzeClusterAgeProgression(cluster1, cluster2) {
+    const result = {
+        track1Progression: null,
+        track2Progression: null,
+        bothProgress: false,
+        oneProgresses: false,
+        gapConsistency: 0
+    };
+
+    // Sort each cluster by timestamp
+    const sorted1 = [...cluster1].sort((a, b) => a.timestamp - b.timestamp);
+    const sorted2 = [...cluster2].sort((a, b) => a.timestamp - b.timestamp);
+
+    // Analyze track 1 progression
+    result.track1Progression = analyzeTrackProgression(sorted1);
+
+    // Analyze track 2 progression
+    result.track2Progression = analyzeTrackProgression(sorted2);
+
+    // Check if both progress appropriately
+    const track1Good = result.track1Progression.isReasonable;
+    const track2Good = result.track2Progression.isReasonable;
+
+    result.bothProgress = track1Good && track2Good;
+    result.oneProgresses = track1Good || track2Good;
+
+    // Calculate age gap consistency over time
+    // Find overlapping time periods and compare gaps
+    result.gapConsistency = calculateGapConsistency(sorted1, sorted2);
+
+    return result;
+}
+
+function analyzeTrackProgression(sortedPoints) {
+    if (sortedPoints.length < 2) {
+        return {
+            isReasonable: true, // Single point can't be unreasonable
+            ageChange: 0,
+            timeSpanYears: 0,
+            ratePerYear: 0
+        };
+    }
+
+    const first = sortedPoints[0];
+    const last = sortedPoints[sortedPoints.length - 1];
+
+    const ageChange = last.age - first.age;
+    const timeSpanYears = (last.timestamp - first.timestamp) / (365.25 * 24 * 60 * 60);
+    const ratePerYear = timeSpanYears > 0 ? ageChange / timeSpanYears : 0;
+
+    // Check for reasonable progression
+    // Reasonable: ages increase at roughly 1 year per calendar year (0.5 to 1.5 is acceptable)
+    // Also acceptable: no change over short periods
+    let isReasonable = false;
+
+    if (timeSpanYears < 0.5) {
+        // Short time span - any small change is fine
+        isReasonable = Math.abs(ageChange) <= 1;
+    } else if (ageChange >= 0) {
+        // Age increased or stayed same - check rate
+        isReasonable = ratePerYear >= 0.5 && ratePerYear <= 1.8;
+    } else {
+        // Age decreased - not reasonable for a single person
+        isReasonable = false;
+    }
+
+    // Also check intermediate points for consistency
+    let hasBackwardsAging = false;
+    for (let i = 1; i < sortedPoints.length; i++) {
+        if (sortedPoints[i].age < sortedPoints[i-1].age) {
+            hasBackwardsAging = true;
+            break;
+        }
+    }
+
+    if (hasBackwardsAging) {
+        isReasonable = false;
+    }
+
+    return {
+        isReasonable,
+        ageChange,
+        timeSpanYears: Math.round(timeSpanYears * 10) / 10,
+        ratePerYear: Math.round(ratePerYear * 100) / 100
+    };
+}
+
+function calculateGapConsistency(sorted1, sorted2) {
+    // Find time windows where we have data from both clusters
+    // and check if the age gap is consistent
+
+    if (sorted1.length === 0 || sorted2.length === 0) {
+        return 0;
+    }
+
+    // Get time range overlap
+    const start1 = sorted1[0].timestamp;
+    const end1 = sorted1[sorted1.length - 1].timestamp;
+    const start2 = sorted2[0].timestamp;
+    const end2 = sorted2[sorted2.length - 1].timestamp;
+
+    const overlapStart = Math.max(start1, start2);
+    const overlapEnd = Math.min(end1, end2);
+
+    // If no overlap, use the full range and extrapolate
+    // Calculate expected gap based on earliest known ages
+    const earliest1 = sorted1[0];
+    const earliest2 = sorted2[0];
+    const latest1 = sorted1[sorted1.length - 1];
+    const latest2 = sorted2[sorted2.length - 1];
+
+    // Calculate gaps at different points
+    const gaps = [];
+
+    // Gap at earliest point (using whichever came first, projecting the other)
+    const earliestGap = Math.abs(earliest1.age - earliest2.age);
+    gaps.push(earliestGap);
+
+    // Gap at latest point
+    const latestGap = Math.abs(latest1.age - latest2.age);
+    gaps.push(latestGap);
+
+    // If we have intermediate points close in time, use those too
+    for (let p1 of sorted1) {
+        for (let p2 of sorted2) {
+            const timeDiff = Math.abs(p1.timestamp - p2.timestamp);
+            // Within 90 days of each other
+            if (timeDiff < 90 * 24 * 60 * 60) {
+                gaps.push(Math.abs(p1.age - p2.age));
+            }
+        }
+    }
+
+    if (gaps.length < 2) {
+        // Not enough data points to assess consistency
+        // If we have a large gap, give it the benefit of the doubt
+        return earliestGap >= 10 ? 0.7 : 0.5;
+    }
+
+    // Calculate consistency as 1 - (stddev / mean)
+    const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+    const variance = gaps.reduce((sum, g) => sum + Math.pow(g - mean, 2), 0) / gaps.length;
+    const stdDev = Math.sqrt(variance);
+
+    // Consistency score: 1.0 = perfectly consistent, 0.0 = highly inconsistent
+    // Allow for ~2 year variance as normal (people might round ages, birthdays, etc.)
+    const consistency = Math.max(0, 1 - (stdDev / Math.max(mean, 1)));
+
+    return Math.round(consistency * 100) / 100;
 }
 
 function estimateBirthday(timelinePoints) {
@@ -3957,8 +4187,14 @@ function buildCouplesSection(analysis) {
                 <div class="deep-analysis-content">
                     <p style="color: #46d160;">✓ No couples/shared account pattern detected.</p>
                     <p style="color: #818384; font-size: 12px; margin-top: 10px;">
-                        ${couples ? couples.explanation : 'Couples detection looks for alternating age patterns suggesting two people share the account.'}
+                        ${couples ? couples.explanation : 'Couples detection looks for two distinct age groups that both age appropriately over time.'}
                     </p>
+                    ${couples && couples.ageGapConsistency > 0 ? `
+                    <p style="color: #818384; font-size: 11px; margin-top: 5px;">
+                        Debug: interleave=${(couples.interleaveRatio * 100).toFixed(0)}%,
+                        gapConsistency=${(couples.ageGapConsistency * 100).toFixed(0)}%
+                    </p>
+                    ` : ''}
                 </div>
             </div>
         `;
@@ -3969,6 +4205,23 @@ function buildCouplesSection(analysis) {
         const birthdayInfo = track.birthdayEstimate && track.birthdayEstimate.confidence !== 'None'
             ? `Birthday: ${track.birthdayEstimate.range} (${track.birthdayEstimate.confidence})`
             : 'Birthday: Unable to estimate';
+
+        // Show progression info if available
+        let progressionInfo = '';
+        if (track.ageProgression) {
+            const prog = track.ageProgression;
+            if (prog.timeSpanYears > 0) {
+                progressionInfo = `
+                    <div class="analysis-stat-row">
+                        <span class="analysis-stat-label">Age Progression</span>
+                        <span class="analysis-stat-value ${prog.isReasonable ? 'success' : 'warning'}">
+                            +${prog.ageChange} years over ${prog.timeSpanYears} years
+                            (${prog.ratePerYear}/yr) ${prog.isReasonable ? '✓' : '⚠️'}
+                        </span>
+                    </div>
+                `;
+            }
+        }
 
         return `
             <div class="couples-track">
@@ -3981,6 +4234,7 @@ function buildCouplesSection(analysis) {
                     <span class="analysis-stat-label">Estimated Current Age</span>
                     <span class="analysis-stat-value">${ageEstimate}</span>
                 </div>
+                ${progressionInfo}
                 <div class="analysis-stat-row">
                     <span class="analysis-stat-label">${birthdayInfo.split(':')[0]}</span>
                     <span class="analysis-stat-value">${birthdayInfo.split(':')[1] || 'Unable to estimate'}</span>
@@ -3993,6 +4247,11 @@ function buildCouplesSection(analysis) {
         `;
     }).join('');
 
+    // Calculate the age gap for display
+    const track1Avg = couples.tracks[0] ? (couples.tracks[0].ageRange.min + couples.tracks[0].ageRange.max) / 2 : 0;
+    const track2Avg = couples.tracks[1] ? (couples.tracks[1].ageRange.min + couples.tracks[1].ageRange.max) / 2 : 0;
+    const avgGap = Math.abs(track1Avg - track2Avg);
+
     return `
         <div class="deep-analysis-section">
             <div class="deep-analysis-header">
@@ -4001,12 +4260,26 @@ function buildCouplesSection(analysis) {
             </div>
             <div class="deep-analysis-content">
                 <p style="color: #ff8c42; margin-bottom: 15px;">
-                    ⚠️ ${couples.explanation}
-                    <br>
-                    <span style="font-size: 12px; color: #818384;">
-                        Interleave ratio: ${(couples.interleaveRatio * 100).toFixed(0)}% (higher = more alternating)
-                    </span>
+                    ⚠️ This appears to be a shared/couples account with two people of different ages.
                 </p>
+                <div style="background-color: #1f1f21; padding: 10px; border-radius: 4px; margin-bottom: 15px;">
+                    <div class="analysis-stat-row">
+                        <span class="analysis-stat-label">Detection Method</span>
+                        <span class="analysis-stat-value info">${couples.detectionMethod || 'Multiple signals'}</span>
+                    </div>
+                    <div class="analysis-stat-row">
+                        <span class="analysis-stat-label">Average Age Gap</span>
+                        <span class="analysis-stat-value">${avgGap.toFixed(0)} years</span>
+                    </div>
+                    <div class="analysis-stat-row">
+                        <span class="analysis-stat-label">Gap Consistency</span>
+                        <span class="analysis-stat-value ${couples.ageGapConsistency >= 0.8 ? 'success' : couples.ageGapConsistency >= 0.6 ? 'warning' : ''}">${(couples.ageGapConsistency * 100).toFixed(0)}%</span>
+                    </div>
+                    <div class="analysis-stat-row">
+                        <span class="analysis-stat-label">Post Interleaving</span>
+                        <span class="analysis-stat-value">${(couples.interleaveRatio * 100).toFixed(0)}%</span>
+                    </div>
+                </div>
                 ${tracksHTML}
             </div>
         </div>
