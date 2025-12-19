@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.31
+// @version      1.32
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -2228,6 +2228,9 @@ function performDeepAnalysis(ageData, username) {
     // Detect backwards aging
     analysis.backwardsAging = detectBackwardsAging(timelinePoints);
 
+    // Detect stale ages (same age for >1 year)
+    analysis.staleAges = detectStaleAges(analysis.ageExtremes);
+
     // Analyze subreddit behavior
     analysis.subredditComparison = analyzeSubredditBehavior(timelinePoints, userSettings.trackedSubreddits || []);
 
@@ -2287,6 +2290,61 @@ function detectBackwardsAging(timelinePoints) {
     }
 
     return anomalies;
+}
+
+function detectStaleAges(ageExtremes) {
+    const staleAges = [];
+
+    if (!ageExtremes || !ageExtremes.ageOccurrences) {
+        return staleAges;
+    }
+
+    const ONE_YEAR = 365.25 * 24 * 60 * 60; // seconds in a year
+
+    Object.keys(ageExtremes.ageOccurrences).forEach(age => {
+        const occurrence = ageExtremes.ageOccurrences[age];
+        const timeSpan = occurrence.last.timestamp - occurrence.first.timestamp;
+        const daysSpan = timeSpan / (24 * 60 * 60);
+        const monthsSpan = daysSpan / 30.44; // average month length
+
+        // Only flag if span is over 1 year (365 days)
+        if (timeSpan > ONE_YEAR) {
+            let severity;
+            if (monthsSpan < 14) {
+                severity = 'Low'; // 13-14 months - might be fudging birthday
+            } else if (monthsSpan < 15) {
+                severity = 'Medium'; // 14-15 months - getting suspicious
+            } else {
+                severity = 'High'; // 15+ months - major red flag
+            }
+
+            staleAges.push({
+                age: parseInt(age),
+                firstDate: occurrence.first.date,
+                lastDate: occurrence.last.date,
+                firstTimestamp: occurrence.first.timestamp,
+                lastTimestamp: occurrence.last.timestamp,
+                daysSpan: Math.round(daysSpan),
+                monthsSpan: Math.round(monthsSpan * 10) / 10,
+                postCount: occurrence.count,
+                severity: severity,
+                firstSubreddit: occurrence.first.subreddit,
+                lastSubreddit: occurrence.last.subreddit,
+                firstPermalink: occurrence.first.permalink,
+                lastPermalink: occurrence.last.permalink
+            });
+        }
+    });
+
+    // Sort by severity and then by duration
+    staleAges.sort((a, b) => {
+        const severityOrder = { 'High': 3, 'Medium': 2, 'Low': 1 };
+        const severityDiff = severityOrder[b.severity] - severityOrder[a.severity];
+        if (severityDiff !== 0) return severityDiff;
+        return b.monthsSpan - a.monthsSpan;
+    });
+
+    return staleAges;
 }
 
 function analyzeSubredditBehavior(timelinePoints, trackedSubs) {
@@ -4418,46 +4476,98 @@ function buildOverviewSection(analysis) {
 
 function buildAnomaliesSection(analysis) {
     const backwardsAging = analysis.backwardsAging;
+    const staleAges = analysis.staleAges || [];
 
-    if (backwardsAging.length === 0) {
+    if (backwardsAging.length === 0 && staleAges.length === 0) {
         return `
             <div class="deep-analysis-section">
                 <div class="deep-analysis-header">
-                    <span class="deep-analysis-title">⚠️ Anomalies & Backwards Aging</span>
+                    <span class="deep-analysis-title">⚠️ Anomalies & Age Inconsistencies</span>
                     <span class="deep-analysis-toggle">▼ Hide</span>
                 </div>
                 <div class="deep-analysis-content">
-                    <p style="color: #46d160;">✓ No backwards aging detected. User ages chronologically.</p>
+                    <p style="color: #46d160;">✓ No age anomalies detected. User ages normally over time.</p>
                 </div>
             </div>
         `;
     }
 
-    const anomaliesHTML = backwardsAging.map(a => `
-        <div class="anomaly-item">
-            <div class="anomaly-description">
-                Age dropped from <strong>${a.fromAge}</strong> to <strong>${a.toAge}</strong>
-                (${a.ageDrop} year${a.ageDrop !== 1 ? 's' : ''} younger)
+    let backwardsHTML = '';
+    if (backwardsAging.length > 0) {
+        const anomaliesHTML = backwardsAging.map(a => `
+            <div class="anomaly-item">
+                <div class="anomaly-description">
+                    Age dropped from <strong>${a.fromAge}</strong> to <strong>${a.toAge}</strong>
+                    (${a.ageDrop} year${a.ageDrop !== 1 ? 's' : ''} younger)
+                </div>
+                <div class="anomaly-date">
+                    ${a.fromDate} (r/${a.fromSubreddit}) → ${a.toDate} (r/${a.toSubreddit})
+                    <br>${a.daysBetween} days between posts
+                    <a href="${a.permalink}" target="_blank" style="margin-left: 10px; color: #0079d3;">View Post →</a>
+                </div>
             </div>
-            <div class="anomaly-date">
-                ${a.fromDate} (r/${a.fromSubreddit}) → ${a.toDate} (r/${a.toSubreddit})
-                <br>${a.daysBetween} days between posts
-                <a href="${a.permalink}" target="_blank" style="margin-left: 10px; color: #0079d3;">View Post →</a>
+        `).join('');
+
+        backwardsHTML = `
+            <div style="margin-bottom: 20px;">
+                <p style="color: #ff6b6b; font-weight: bold; margin-bottom: 10px;">
+                    🔴 Backwards Aging Detected (${backwardsAging.length} instance${backwardsAging.length > 1 ? 's' : ''})
+                </p>
+                <p style="color: #ff6b6b; margin-bottom: 15px; font-size: 13px;">
+                    User posted as a younger age AFTER claiming to be older. This indicates age falsification or a couples account.
+                </p>
+                ${anomaliesHTML}
             </div>
-        </div>
-    `).join('');
+        `;
+    }
+
+    let staleHTML = '';
+    if (staleAges.length > 0) {
+        const severityColors = {
+            'High': '#ff6b6b',
+            'Medium': '#ff8c42',
+            'Low': '#ffa500'
+        };
+
+        const staleAgesHTML = staleAges.map(s => `
+            <div class="anomaly-item" style="border-left-color: ${severityColors[s.severity]};">
+                <div class="anomaly-description" style="color: ${severityColors[s.severity]};">
+                    <strong>${s.severity} Severity:</strong> Posted as age <strong>${s.age}</strong> for ${s.monthsSpan} months
+                    (${s.daysSpan} days, ${s.postCount} post${s.postCount !== 1 ? 's' : ''})
+                </div>
+                <div class="anomaly-date">
+                    First: ${s.firstDate} (r/${s.firstSubreddit})
+                    <a href="${s.firstPermalink}" target="_blank" style="margin-left: 10px; color: #0079d3;">View →</a>
+                    <br>
+                    Last: ${s.lastDate} (r/${s.lastSubreddit})
+                    <a href="${s.lastPermalink}" target="_blank" style="margin-left: 10px; color: #0079d3;">View →</a>
+                </div>
+            </div>
+        `).join('');
+
+        staleHTML = `
+            <div style="margin-bottom: 20px;">
+                <p style="color: #ff8c42; font-weight: bold; margin-bottom: 10px;">
+                    ⏰ Stale Age Detection (${staleAges.length} instance${staleAges.length > 1 ? 's' : ''})
+                </p>
+                <p style="color: #ff8c42; margin-bottom: 15px; font-size: 13px;">
+                    User posted the same age for over a year, indicating consistent age falsification.
+                    <br><span style="font-size: 11px;">Severity: Low (13-14mo), Medium (14-15mo), High (15+mo)</span>
+                </p>
+                ${staleAgesHTML}
+            </div>
+        `;
+    }
 
     return `
         <div class="deep-analysis-section">
             <div class="deep-analysis-header">
-                <span class="deep-analysis-title">⚠️ Anomalies & Backwards Aging (${backwardsAging.length} found)</span>
+                <span class="deep-analysis-title">⚠️ Anomalies & Age Inconsistencies</span>
                 <span class="deep-analysis-toggle">▼ Hide</span>
             </div>
             <div class="deep-analysis-content">
-                <p style="color: #ff6b6b; margin-bottom: 15px;">
-                    User posted as a younger age AFTER claiming to be older. This could indicate age falsification or a couples account.
-                </p>
-                ${anomaliesHTML}
+                ${backwardsHTML}
+                ${staleHTML}
             </div>
         </div>
     `;
