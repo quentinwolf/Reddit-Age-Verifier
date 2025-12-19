@@ -3524,7 +3524,12 @@ function showResultsModal(username, ageData) {
     resultsModals.push({ modalId, modal, overlay, username });
 
     const closeBtn = modal.querySelector('.age-modal-close');
-    const closeButton = modal.querySelector('.age-modal-button.secondary');
+    const closeButton = modal.querySelector('.age-modal-buttons .age-modal-button.secondary');
+
+    logDebug('Close button (X):', closeBtn);
+    logDebug('Close button (bottom):', closeButton);
+    logDebug('Both buttons found:', closeBtn !== null && closeButton !== null);
+
     const recheckBtn = modal.querySelector('.recheck-age');
     const clearUserBtn = modal.querySelector('.clear-user');
     const deepAnalysisBtn = modal.querySelector('.deep-analysis');
@@ -3549,8 +3554,15 @@ function showResultsModal(username, ageData) {
         resultsModals = resultsModals.filter(m => m.modalId !== modalId);
     };
 
-    closeBtn.onclick = closeModal;
-    closeButton.onclick = closeModal;
+    closeBtn.addEventListener('click', (e) => {
+        console.log('X button clicked');
+        closeModal();
+    });
+
+    closeButton.addEventListener('click', (e) => {
+        console.log('Bottom close button clicked');
+        closeModal();
+    });
 
     recheckBtn.onclick = () => {
         clearUserCache(username);
