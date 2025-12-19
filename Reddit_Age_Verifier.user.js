@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.06
+// @version      1.08
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -41,7 +41,9 @@ const debugMode = true; // Set to 'true' for console logs
 
 // Search configuration
 const MIN_AGE = 10;                // Minimum age to search for
-const MAX_AGE = 50;                // Maximum age to search for
+const MAX_AGE = 70;                // Maximum age to search for
+
+const ENABLE_VERY_LOW_CONFIDENCE = true;  // Show age estimates even with very low confidence
 
 // Cache expiration times
 const CACHE_EXPIRATION = 7 * 24 * 60 * 60 * 1000;      // 1 week for user results
@@ -481,7 +483,7 @@ function attemptAutoFetchToken() {
     return false;
 }
 
-function showTokenModal() {
+function showTokenModal(pendingUsername = null) {
     if (tokenModal) return; // Already showing
 
     const overlay = document.createElement('div');
@@ -538,7 +540,13 @@ function showTokenModal() {
         if (token) {
             saveToken(token);
             closeModal();
-            alert('Token saved successfully! You can now check user ages.');
+
+            // If there was a pending username, automatically continue the age check
+            if (pendingUsername) {
+                handleAgeCheck(pendingUsername);
+            } else {
+                alert('Token saved successfully! You can now check user ages.');
+            }
         } else {
             alert('Please enter a valid token.');
         }
@@ -771,6 +779,142 @@ function processResults(results, username) {
     return ageData;
 }
 
+function estimateCurrentAge(ageData) {
+    // Only use posted ages (in brackets) for estimation
+    const dataPoints = [];
+
+    ageData.results.forEach(result => {
+        if (result.postedAges && result.postedAges.length > 0) {
+            // Parse date string back to timestamp
+            const dateParts = result.date.split('/');
+            let timestamp;
+            if (dateParts.length === 3) {
+                // Assuming MM/DD/YYYY format
+                timestamp = new Date(`${dateParts[2]}-${dateParts[0]}-${dateParts[1]}`).getTime() / 1000;
+            } else {
+                return; // Skip if we can't parse date
+            }
+
+            result.postedAges.forEach(age => {
+                dataPoints.push({ timestamp, age });
+            });
+        }
+    });
+
+    if (dataPoints.length === 0) {
+        return null;
+    }
+
+    // Sort by timestamp
+    dataPoints.sort((a, b) => a.timestamp - b.timestamp);
+
+    const now = Date.now() / 1000;
+    const earliest = dataPoints[0];
+    const latest = dataPoints[dataPoints.length - 1];
+    const yearSpan = (latest.timestamp - earliest.timestamp) / (365.25 * 24 * 60 * 60);
+    const yearsSinceLatest = (now - latest.timestamp) / (365.25 * 24 * 60 * 60);
+
+    let estimatedAge, confidence;
+
+    if (dataPoints.length === 1) {
+        // Single data point
+        estimatedAge = latest.age + yearsSinceLatest;
+
+        if (yearsSinceLatest >= 1) {
+            confidence = 'Medium';
+        } else if (yearsSinceLatest >= 0.25) {
+            confidence = 'Low';
+        } else {
+            if (!ENABLE_VERY_LOW_CONFIDENCE) return null;
+            confidence = 'Very Low';
+        }
+    } else {
+        // Multiple data points
+        const ageChange = latest.age - earliest.age;
+        const rate = yearSpan > 0 ? ageChange / yearSpan : 0;
+
+        // Check for decreasing or wildly inconsistent ages
+        let hasDecreasingAges = false;
+        for (let i = 1; i < dataPoints.length; i++) {
+            if (dataPoints[i].age < dataPoints[i-1].age - 1) { // Allow 1 year tolerance
+                hasDecreasingAges = true;
+                break;
+            }
+        }
+
+        if (hasDecreasingAges) {
+            return null; // No estimation for inconsistent data
+        }
+
+        // Calculate variance for very short spans
+        if (yearSpan < 1 && dataPoints.length >= 2) {
+            const ages = dataPoints.map(d => d.age);
+            const mean = ages.reduce((a, b) => a + b, 0) / ages.length;
+            const variance = ages.reduce((sum, age) => sum + Math.pow(age - mean, 2), 0) / ages.length;
+            const stdDev = Math.sqrt(variance);
+
+            if (stdDev > 2) {
+                return null; // Too much variance in short time
+            }
+        }
+
+        // Project to current date
+        estimatedAge = latest.age + (yearsSinceLatest * rate);
+
+        // Calculate progression consistency score
+        let consistencyScore = 0;
+        let consistentPoints = 0;
+
+        if (dataPoints.length >= 3) {
+            // Check how many points follow expected aging pattern
+            for (let i = 1; i < dataPoints.length; i++) {
+                const timeDiff = (dataPoints[i].timestamp - dataPoints[i-1].timestamp) / (365.25 * 24 * 60 * 60);
+                const ageDiff = dataPoints[i].age - dataPoints[i-1].age;
+                const pointRate = timeDiff > 0 ? ageDiff / timeDiff : 0;
+
+                // Allow for rounding and timing within year (rate between 0.7 and 1.5 is reasonable)
+                if (pointRate >= 0.7 && pointRate <= 1.5) {
+                    consistentPoints++;
+                }
+            }
+            consistencyScore = consistentPoints / (dataPoints.length - 1);
+        }
+
+        // Determine confidence with improved logic
+        if (dataPoints.length >= 10 && yearSpan >= 2 && rate >= 0.6 && rate <= 1.6 && consistencyScore >= 0.7) {
+            // Lots of data points spanning years with consistent progression = High confidence
+            confidence = 'High';
+        } else if (dataPoints.length >= 3 && yearSpan >= 2 && rate >= 0.7 && rate <= 1.5) {
+            // Multiple points over years with reasonable rate = High confidence
+            confidence = 'High';
+        } else if (dataPoints.length >= 2 && yearSpan >= 1 && rate >= 0.6 && rate <= 1.6) {
+            // Two+ points over a year with reasonable rate = Medium confidence
+            confidence = 'Medium';
+        } else if (rate >= 0.5 && rate <= 2.0) {
+            // Single point or short span but reasonable rate = Low confidence
+            confidence = 'Low';
+        } else {
+            if (!ENABLE_VERY_LOW_CONFIDENCE) return null;
+            confidence = 'Very Low';
+        }
+    }
+
+    // Round to nearest 0.5
+    estimatedAge = Math.round(estimatedAge * 2) / 2;
+
+    // Sanity check
+    if (estimatedAge < MIN_AGE || estimatedAge > MAX_AGE + 10) {
+        return null;
+    }
+
+    return {
+        estimatedAge,
+        confidence,
+        dataPoints: dataPoints.length,
+        yearSpan: Math.round(yearSpan * 10) / 10 // Round to 1 decimal
+    };
+}
+
 function highlightAgesInText(text, postedAges, possibleAges) {
     let highlighted = text;
 
@@ -915,7 +1059,7 @@ function showResultsModal(username, ageData) {
     modal.dataset.modalId = modalId;
     modal.style.minWidth = '600px';
     modal.style.width = '800px';
-    modal.style.height = '600px';
+    modal.style.height = '750px';
     modal.style.zIndex = ++zIndexCounter;
 
     const postedAges = ageData.postedAges;
@@ -966,11 +1110,32 @@ function showResultsModal(username, ageData) {
             ? (minPosted === maxPosted ? `${minPosted}` : `${minPosted}-${maxPosted}`)
             : 'None';
 
+        // Calculate estimated current age
+        const ageEstimate = estimateCurrentAge(ageData);
+        let estimateHTML = '';
+        if (ageEstimate) {
+            const confidenceColors = {
+                'High': '#46d160',
+                'Medium': '#ff8c42',
+                'Low': '#ffa500',
+                'Very Low': '#ff6b6b'
+            };
+            const confidenceColor = confidenceColors[ageEstimate.confidence] || '#818384';
+            estimateHTML = `<p style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #343536;">
+                <strong>Estimated Current Age:</strong>
+                <span style="color: ${confidenceColor}; font-weight: bold; font-size: 16px;">${ageEstimate.estimatedAge}</span>
+                <span style="color: #818384; font-size: 12px;"> (${ageEstimate.confidence} Confidence)</span>
+                <br>
+                <span style="color: #818384; font-size: 11px;">Based on ${ageEstimate.dataPoints} data point${ageEstimate.dataPoints > 1 ? 's' : ''} spanning ${ageEstimate.yearSpan} year${ageEstimate.yearSpan !== 1 ? 's' : ''}</span>
+            </p>`;
+        }
+
         summaryHTML = `<div class="age-summary">
             <div class="age-summary-title">Found Ages: ${postedRangeText}</div>
             <p>Posted ages found: ${postedAges.length > 0 ? postedAges.join(', ') : 'None'}</p>
             <p>Possible ages found: ${possibleAges.length > 0 ? possibleAges.join(', ') : 'None'}</p>
             <p>Total posts with age mentions: ${results.length}</p>
+            ${estimateHTML}
             ${postedChipsHTML}
             ${possibleChipsHTML}
         </div>`;
@@ -996,7 +1161,10 @@ function showResultsModal(username, ageData) {
                 : '';
 
             resultsHTML += `
-                <div class="age-result-item" data-index="${index}" data-ages="${result.allAges.join(',')}">
+                <div class="age-result-item" data-index="${index}"
+                     data-posted-ages="${result.postedAges.join(',')}"
+                     data-possible-ages="${result.possibleAges.join(',')}"
+                     data-all-ages="${result.allAges.join(',')}">
                     <div class="age-result-header">
                         <span class="age-result-age">Age: ${postedBadge} ${possibleBadge}</span>
                         <span class="age-result-date">${result.date}</span>
@@ -1118,10 +1286,27 @@ function showResultsModal(username, ageData) {
                 ageChips.forEach(c => c.classList.remove('active'));
                 chip.classList.add('active');
 
-                // Filter results
+                // Filter results based on chip type
+                const chipType = chip.dataset.type; // 'posted' or 'possible'
+
                 resultItems.forEach(item => {
-                    const itemAges = item.dataset.ages.split(',').map(a => parseInt(a));
-                    if (itemAges.includes(filterAge)) {
+                    let shouldShow = false;
+
+                    if (chipType === 'posted') {
+                        // Posted age chips: only show if age is in posted ages
+                        const postedAges = item.dataset.postedAges ?
+                            item.dataset.postedAges.split(',').map(a => parseInt(a)) : [];
+                        shouldShow = postedAges.includes(filterAge);
+                    } else if (chipType === 'possible') {
+                        // Possible age chips: show if age is in either posted OR possible
+                        const postedAges = item.dataset.postedAges ?
+                            item.dataset.postedAges.split(',').map(a => parseInt(a)) : [];
+                        const possibleAges = item.dataset.possibleAges ?
+                            item.dataset.possibleAges.split(',').map(a => parseInt(a)) : [];
+                        shouldShow = postedAges.includes(filterAge) || possibleAges.includes(filterAge);
+                    }
+
+                    if (shouldShow) {
                         item.classList.remove('hidden');
                     } else {
                         item.classList.add('hidden');
@@ -1262,7 +1447,7 @@ async function handleAgeCheck(username) {
     // Check if we have a token
     if (!apiToken) {
         attemptAutoFetchToken(); // Always returns false, logs message
-        showTokenModal();
+        showTokenModal(username);
         return;
     }
 
@@ -1293,10 +1478,10 @@ async function handleAgeCheck(username) {
         // Show error
         showErrorModal(username, error.message);
 
-        // If token error, show token modal after closing error
+        // If token error, show token modal after closing error and retry with username
         if (error.message.includes('token') || error.message.includes('Token')) {
             setTimeout(() => {
-                showTokenModal();
+                showTokenModal(username);
             }, 100);
         }
     }
