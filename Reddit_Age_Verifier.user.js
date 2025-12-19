@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.16
+// @version      1.17
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -235,8 +235,8 @@ GM_addStyle(`
         z-index: 10000;
         min-width: 400px;
         min-height: 300px;
-        max-width: 90vw;
-        max-height: 80vh;
+        max-width: 95vw;
+        max-height: 95vh;  /* <-- Increased to 95% */
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.5);
         display: flex;
         flex-direction: column;
@@ -885,7 +885,6 @@ function showSettingsModal() {
     modal.style.minWidth = '650px';
     modal.style.width = '700px';
     modal.style.height = '80vh';
-    modal.style.maxHeight = '700px';
     modal.style.zIndex = ++zIndexCounter;
 
     // Build common bots checkboxes
