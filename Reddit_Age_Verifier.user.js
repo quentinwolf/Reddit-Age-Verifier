@@ -2035,7 +2035,7 @@ function showResultsModal(username, ageData) {
             const highlightedTitle = highlightAgesInText(displayTitle, result.postedAges, result.possibleAges);
 
             const titleExpandLink = titleNeedsTruncation
-                ? `<span class="expand-link" data-target="title-${index}"> [ Expand ]</span>`
+                ? `<span class="expand-link" data-target="title-${index}">... [ Expand ]</span>`
                 : '';
             const titleCollapseLink = titleNeedsTruncation
                 ? `<span class="collapse-link" data-target="title-${index}" style="display: none;"> [ Collapse ]</span>`
@@ -2051,7 +2051,7 @@ function showResultsModal(username, ageData) {
                 const highlightedBody = highlightAgesInText(displayBody, result.postedAges, result.possibleAges);
 
                 const bodyExpandLink = bodyNeedsTruncation
-                    ? `<span class="expand-link" data-target="body-${index}"> [ Expand ]</span>`
+                    ? `<span class="expand-link" data-target="body-${index}">... [ Expand ]</span>`
                     : '';
                 const bodyCollapseLink = bodyNeedsTruncation
                     ? `<span class="collapse-link" data-target="body-${index}" style="display: none;"> [ Collapse ]</span>`
