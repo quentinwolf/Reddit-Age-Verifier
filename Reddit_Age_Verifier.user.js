@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.33
+// @version      1.34
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -5171,6 +5171,30 @@ loadToken();
 // Set up mutation observer
 const observer = new MutationObserver(debouncedMainLoop);
 observer.observe(document.body, { childList: true, subtree: true });
+
+// Escape key handler to close topmost modal
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' || e.keyCode === 27) {
+        // Find the modal with the highest z-index
+        let topmostModal = null;
+        let highestZIndex = -1;
+
+        resultsModals.forEach(modalInfo => {
+            if (modalInfo.modal && modalInfo.modal.parentNode) {
+                const zIndex = parseInt(modalInfo.modal.style.zIndex) || 0;
+                if (zIndex > highestZIndex) {
+                    highestZIndex = zIndex;
+                    topmostModal = modalInfo;
+                }
+            }
+        });
+
+        // Close the topmost modal if found
+        if (topmostModal) {
+            closeModalById(topmostModal.modalId);
+        }
+    }
+});
 
 logDebug(`Reddit Age Verifier ready for ${isModReddit ? 'mod.reddit.com' : 'old.reddit.com'}`);
 logDebug(`Checking ages ${MIN_AGE}-${MAX_AGE} using PushShift API with exact_author=true`);
