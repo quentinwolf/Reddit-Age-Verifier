@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.18
+// @version      1.19
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -363,8 +363,7 @@ GM_addStyle(`
     }
 
     .age-summary-title {
-        font-weight: bold;
-        margin-bottom: 8px;
+        margin-bottom: 4px;
         color: #d7dadc;
     }
 
@@ -882,8 +881,8 @@ function showSettingsModal() {
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
     modal.dataset.modalId = modalId;
-    modal.style.minWidth = '650px';
-    modal.style.width = '700px';
+    modal.style.minWidth = '500px';
+    modal.style.width = '500px';
     modal.style.height = '80vh';
     modal.style.zIndex = ++zIndexCounter;
 
@@ -1899,7 +1898,7 @@ function showResultsModal(username, ageData) {
     modal.dataset.modalId = modalId;
     modal.style.minWidth = '600px';
     modal.style.width = '800px';
-    modal.style.height = '750px';
+    modal.style.height = '900px';
     modal.style.zIndex = ++zIndexCounter;
 
     const postedAges = ageData.postedAges;
@@ -1976,7 +1975,7 @@ function showResultsModal(username, ageData) {
                     anomalyNote = '<br><span style="color: #ff8c42; font-size: 11px;">⚠ Age inconsistencies detected in data</span>';
                 }
 
-                estimateHTML = `<p style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #343536;">
+                estimateHTML = `<p style="margin-top: 8px; padding-top: 4px; border-top: 1px solid #343536;">
                     <strong>Estimated Current Age:</strong>
                     <span style="color: ${confidenceColor}; font-weight: bold; font-size: 16px;">${ageEstimate.estimatedAge}</span>
                     <span style="color: #818384; font-size: 12px;"> (${ageEstimate.confidence} Confidence)</span>
@@ -1988,10 +1987,9 @@ function showResultsModal(username, ageData) {
         }
 
         summaryHTML = `<div class="age-summary">
-            <div class="age-summary-title">Found Ages: ${postedRangeText}</div>
+            <div class="age-summary-title"><b>Found Ages: ${postedRangeText}</b> (Total posts with age mentions: ${results.length})</div>
             <p>Posted ages found: ${postedAges.length > 0 ? postedAges.join(', ') : 'None'}</p>
             <p>Possible ages found: ${possibleAges.length > 0 ? possibleAges.join(', ') : 'None'}</p>
-            <p>Total posts with age mentions: ${results.length}</p>
             ${estimateHTML}
             ${postedChipsHTML}
             ${possibleChipsHTML}
