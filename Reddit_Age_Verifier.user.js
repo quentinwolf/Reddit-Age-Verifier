@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.23
+// @version      1.24
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -1133,7 +1133,7 @@ function showSettingsModal() {
            </div>`
         : '<p class="age-settings-help-text">No ignored users yet.</p>';
 
-    modal.innerHTML = `
+        modal.innerHTML = `
         <div class="age-modal-header">
             <div class="age-modal-title-row">
                 <div class="age-modal-title">Settings</div>
@@ -1141,6 +1141,76 @@ function showSettingsModal() {
             </div>
         </div>
         <div class="age-modal-content">
+            <!-- Cache Statistics -->
+            <div class="age-settings-section">
+                <div class="age-settings-section-title">📊 Cache Statistics</div>
+
+                <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
+                    <span class="analysis-stat-label">Cached Users</span>
+                    <span class="analysis-stat-value">${(() => {
+                        const stats = getCacheStatistics();
+                        return stats.userCount;
+                    })()}</span>
+                </div>
+
+                <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
+                    <span class="analysis-stat-label">Total Cache Size</span>
+                    <span class="analysis-stat-value">${(() => {
+                        const stats = getCacheStatistics();
+                        return stats.sizeFormatted;
+                    })()}</span>
+                </div>
+
+                <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
+                    <span class="analysis-stat-label">Total Posts Cached</span>
+                    <span class="analysis-stat-value">${(() => {
+                        const stats = getCacheStatistics();
+                        return stats.totalPosts.toLocaleString();
+                    })()}</span>
+                </div>
+
+                <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
+                    <span class="analysis-stat-label">Average Posts per User</span>
+                    <span class="analysis-stat-value">${(() => {
+                        const stats = getCacheStatistics();
+                        return stats.userCount > 0 ? stats.averagePosts : 0;
+                    })()}</span>
+                </div>
+
+                ${(() => {
+                    const stats = getCacheStatistics();
+                    return stats.oldestCache ? `
+                        <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
+                            <span class="analysis-stat-label">Oldest Cache Entry</span>
+                            <span class="analysis-stat-value">${stats.oldestCache.toLocaleDateString()}</span>
+                        </div>
+                        <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
+                            <span class="analysis-stat-label">Newest Cache Entry</span>
+                            <span class="analysis-stat-value">${stats.newestCache.toLocaleDateString()}</span>
+                        </div>
+                    ` : '';
+                })()}
+
+                <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
+                    <span class="analysis-stat-label">API Token Status</span>
+                    <span class="analysis-stat-value ${(() => {
+                        const stats = getCacheStatistics();
+                        return stats.hasToken ? 'success' : 'danger';
+                    })()}">${(() => {
+                        const stats = getCacheStatistics();
+                        return stats.hasToken ? `Active (${stats.tokenAge || 'unknown age'})` : 'Not Set';
+                    })()}</span>
+                </div>
+
+                <!-- Clear All Cache Button -->
+                <div class="age-settings-buttons-row" style="margin-top: 15px;">
+                    <button class="age-modal-button danger" id="clear-all-cache-btn">Clear All Cache</button>
+                    <span class="age-settings-help-text" style="margin-left: 10px; line-height: 32px;">
+                        Remove all cached age verification data
+                    </span>
+                </div>
+            </div>
+
             <!-- General Settings -->
             <div class="age-settings-section">
                 <div class="age-settings-section-title">General Settings</div>
@@ -1426,6 +1496,23 @@ function showSettingsModal() {
                 // Re-attach remove handlers
                 attachRemoveHandlers(modal);
             }
+        }
+    };
+
+    const clearAllCacheBtn = modal.querySelector('#clear-all-cache-btn');
+    clearAllCacheBtn.onclick = () => {
+        if (confirm('Clear all cached age verification data? This will remove data for all users.')) {
+            clearAllCache();
+
+            // Update all cached buttons
+            document.querySelectorAll('.age-check-button.cached').forEach(btn => {
+                const username = btn.dataset.username;
+                updateButtonForUser(username);
+            });
+
+            // Refresh the settings modal to update statistics
+            closeModal();
+            showSettingsModal();
         }
     };
 
@@ -2873,6 +2960,71 @@ function calculateConsistencyScore(timelinePoints, backwardsAging) {
     return Math.max(0, Math.min(100, score));
 }
 
+function getCacheStatistics() {
+    const stats = {
+        userCount: 0,
+        totalSize: 0,
+        sizeFormatted: '0 KB',
+        totalPosts: 0,
+        oldestCache: null,
+        newestCache: null,
+        averagePosts: 0,
+        hasToken: apiToken !== null,
+        tokenAge: null
+    };
+
+    const users = Object.keys(ageCache);
+    stats.userCount = users.length;
+
+    if (stats.userCount > 0) {
+        let oldestTimestamp = Date.now();
+        let newestTimestamp = 0;
+        let totalPosts = 0;
+
+        users.forEach(username => {
+            const cached = ageCache[username];
+            if (cached.timestamp < oldestTimestamp) {
+                oldestTimestamp = cached.timestamp;
+            }
+            if (cached.timestamp > newestTimestamp) {
+                newestTimestamp = cached.timestamp;
+            }
+            if (cached.data && cached.data.results) {
+                totalPosts += cached.data.results.length;
+            }
+        });
+
+        stats.oldestCache = new Date(oldestTimestamp);
+        stats.newestCache = new Date(newestTimestamp);
+        stats.totalPosts = totalPosts;
+        stats.averagePosts = Math.round(totalPosts / stats.userCount);
+    }
+
+    // Calculate cache size
+    const cacheString = JSON.stringify(ageCache);
+    stats.totalSize = cacheString.length;
+
+    // Format size
+    if (stats.totalSize < 1024) {
+        stats.sizeFormatted = stats.totalSize + ' B';
+    } else if (stats.totalSize < 1024 * 1024) {
+        stats.sizeFormatted = (stats.totalSize / 1024).toFixed(2) + ' KB';
+    } else {
+        stats.sizeFormatted = (stats.totalSize / (1024 * 1024)).toFixed(2) + ' MB';
+    }
+
+    // Check token age
+    const tokenData = JSON.parse(GM_getValue('pushShiftToken', 'null'));
+    if (tokenData && tokenData.timestamp) {
+        const tokenAge = Date.now() - tokenData.timestamp;
+        const hoursOld = Math.floor(tokenAge / (1000 * 60 * 60));
+        const minutesOld = Math.floor((tokenAge % (1000 * 60 * 60)) / (1000 * 60));
+        stats.tokenAge = `${hoursOld}h ${minutesOld}m`;
+    }
+
+    return stats;
+}
+
 // ============================================================================
 // PAGINATION SUPPORT
 // ============================================================================
@@ -3304,7 +3456,6 @@ function showResultsModal(username, ageData) {
             <button class="age-modal-button deep-analysis">Deep Analysis</button>
             <button class="age-modal-button recheck-age">Recheck Age</button>
             <button class="age-modal-button danger clear-user">Clear This User Cache</button>
-            <button class="age-modal-button danger clear-all">Clear All Cache</button>
             <button class="age-modal-button secondary">Close</button>
         </div>
     `;
@@ -3331,7 +3482,6 @@ function showResultsModal(username, ageData) {
     const closeButton = modal.querySelector('.age-modal-button.secondary');
     const recheckBtn = modal.querySelector('.recheck-age');
     const clearUserBtn = modal.querySelector('.clear-user');
-    const clearAllBtn = modal.querySelector('.clear-all');
     const deepAnalysisBtn = modal.querySelector('.deep-analysis');
     const ageChips = modal.querySelectorAll('.age-chip');
     const resultItems = modal.querySelectorAll('.age-result-item');
@@ -3368,17 +3518,6 @@ function showResultsModal(username, ageData) {
             clearUserCache(username);
             closeModal();
             updateButtonForUser(username);
-        }
-    };
-
-    clearAllBtn.onclick = () => {
-        if (confirm('Clear all cached age verification data?')) {
-            clearAllCache();
-            closeModal();
-            document.querySelectorAll('.age-check-button.cached').forEach(btn => {
-                const username = btn.dataset.username;
-                updateButtonForUser(username);
-            });
         }
     };
 
