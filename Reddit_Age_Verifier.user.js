@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.17
+// @version      1.18
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -2178,8 +2178,8 @@ function showResultsModal(username, ageData) {
         }
     };
 
-// Age filter functionality with multi-select support
-    let activeFilters = new Set(); // Track multiple active filters
+    // Age filter functionality with multi-select support
+    let activeFilters = new Set(); // Track multiple active filters as "age-type" strings
 
     function updateFilterDisplay() {
         const visibleCount = Array.from(resultItems).filter(item => !item.classList.contains('hidden')).length;
@@ -2198,7 +2198,36 @@ function showResultsModal(username, ageData) {
                     filterStatus.className = 'age-filter-status';
                     filterStatusContainer.appendChild(filterStatus);
                 }
-                const agesText = Array.from(activeFilters).sort((a, b) => a - b).join(', ');
+
+                // Parse filters to show ages
+                const filterAges = Array.from(activeFilters).map(f => {
+                    const [age, type] = f.split('-');
+                    return { age: parseInt(age), type };
+                });
+
+                // Group by age and show with type indicators
+                const ageGroups = {};
+                filterAges.forEach(({age, type}) => {
+                    if (!ageGroups[age]) {
+                        ageGroups[age] = [];
+                    }
+                    ageGroups[age].push(type);
+                });
+
+                const agesText = Object.keys(ageGroups)
+                    .sort((a, b) => parseInt(a) - parseInt(b))
+                    .map(age => {
+                        const types = ageGroups[age];
+                        if (types.length === 2) {
+                            return `${age} (posted+possible)`;
+                        } else if (types[0] === 'posted') {
+                            return `${age} (posted)`;
+                        } else {
+                            return `${age} (possible)`;
+                        }
+                    })
+                    .join(', ');
+
                 filterStatus.textContent = `Showing ${visibleCount} posts with age${activeFilters.size > 1 ? 's' : ''} ${agesText}. Click to clear filter.`;
                 filterStatus.onclick = () => {
                     activeFilters.clear();
@@ -2215,7 +2244,7 @@ function showResultsModal(username, ageData) {
             // No filters - show all
             resultItems.forEach(item => item.classList.remove('hidden'));
         } else {
-            // Apply filters - show items matching ANY of the selected ages
+            // Apply filters - show items matching ANY of the selected age-type combinations
             resultItems.forEach(item => {
                 const postedAges = item.dataset.postedAges ?
                     item.dataset.postedAges.split(',').map(a => parseInt(a)) : [];
@@ -2224,23 +2253,21 @@ function showResultsModal(username, ageData) {
 
                 let shouldShow = false;
 
-                // Check each active filter
-                activeFilters.forEach(filterAge => {
-                    // Find the chip type for this age
-                    const chip = Array.from(ageChips).find(c => parseInt(c.dataset.age) === filterAge);
-                    if (chip) {
-                        const chipType = chip.dataset.type;
+                // Check each active filter (format: "age-type")
+                activeFilters.forEach(filter => {
+                    const [ageStr, type] = filter.split('-');
+                    const filterAge = parseInt(ageStr);
 
-                        if (chipType === 'posted') {
-                            // Posted age chips: only show if age is in posted ages
-                            if (postedAges.includes(filterAge)) {
-                                shouldShow = true;
-                            }
-                        } else if (chipType === 'possible') {
-                            // Possible age chips: show if age is in either posted OR possible
-                            if (postedAges.includes(filterAge) || possibleAges.includes(filterAge)) {
-                                shouldShow = true;
-                            }
+                    if (type === 'posted') {
+                        // Posted age filter: only show if age is in posted ages
+                        if (postedAges.includes(filterAge)) {
+                            shouldShow = true;
+                        }
+                    } else if (type === 'possible') {
+                        // Possible age filter: show if age is in possible ages (not posted)
+                        // A "possible" age in the data means it wasn't in brackets
+                        if (possibleAges.includes(filterAge)) {
+                            shouldShow = true;
                         }
                     }
                 });
@@ -2259,20 +2286,22 @@ function showResultsModal(username, ageData) {
     ageChips.forEach(chip => {
         chip.addEventListener('click', (e) => {
             const filterAge = parseInt(chip.dataset.age);
+            const filterType = chip.dataset.type;
+            const filterKey = `${filterAge}-${filterType}`; // Unique key combining age and type
             const shiftKey = e.shiftKey;
 
             if (shiftKey) {
-                // Shift-click: Toggle this age in the selection
-                if (activeFilters.has(filterAge)) {
-                    activeFilters.delete(filterAge);
+                // Shift-click: Toggle this age-type combination in the selection
+                if (activeFilters.has(filterKey)) {
+                    activeFilters.delete(filterKey);
                     chip.classList.remove('active');
                 } else {
-                    activeFilters.add(filterAge);
+                    activeFilters.add(filterKey);
                     chip.classList.add('active');
                 }
             } else {
-                // Regular click: Select only this age (clear others)
-                if (activeFilters.size === 1 && activeFilters.has(filterAge)) {
+                // Regular click: Select only this age-type (clear others)
+                if (activeFilters.size === 1 && activeFilters.has(filterKey)) {
                     // Clicking the only active filter - clear it
                     activeFilters.clear();
                     chip.classList.remove('active');
@@ -2280,7 +2309,7 @@ function showResultsModal(username, ageData) {
                     // Clear all other filters and select this one
                     activeFilters.clear();
                     ageChips.forEach(c => c.classList.remove('active'));
-                    activeFilters.add(filterAge);
+                    activeFilters.add(filterKey);
                     chip.classList.add('active');
                 }
             }
@@ -2370,7 +2399,9 @@ function showResultsModal(username, ageData) {
         const postedChips = modal.querySelectorAll('.age-chip.posted');
         postedChips.forEach(chip => {
             const filterAge = parseInt(chip.dataset.age);
-            activeFilters.add(filterAge);
+            const filterType = chip.dataset.type;
+            const filterKey = `${filterAge}-${filterType}`;
+            activeFilters.add(filterKey);
             chip.classList.add('active');
         });
 
