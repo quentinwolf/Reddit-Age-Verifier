@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.32
+// @version      1.33
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -974,6 +974,12 @@ GM_addStyle(`
         font-size: 11px;
         margin-top: 4px;
     }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.8; }
+    }
+
 `);
 
 // Debug Function to log messages to console if enabled at top of script
@@ -4298,11 +4304,62 @@ function showDeepAnalysisModal(username, ageData, analysis) {
             // Re-attach event handlers for collapsible sections
             attachDeepAnalysisHandlers(modal, modalId, username);
 
+            // Notify any open results modals for this user
+            notifyResultsModalOfNewData(username);
+
         } catch (error) {
             console.error('Fetch more error:', error);
             fetchMoreBtn.textContent = `Error: ${error.message}`;
         }
     };
+}
+
+function notifyResultsModalOfNewData(username) {
+    // Find any results modals for this username
+    const resultsModal = resultsModals.find(m =>
+        m.username === username &&
+        m.modal.querySelector('.age-results-container') // Ensure it's a results modal, not deep analysis
+    );
+
+    if (!resultsModal) return;
+
+    // Check if banner already exists
+    if (resultsModal.modal.querySelector('.age-new-data-banner')) return;
+
+    // Create notification banner
+    const banner = document.createElement('div');
+    banner.className = 'age-new-data-banner';
+    banner.innerHTML = `
+        <span>📊 New data available (click to refresh with updated results)</span>
+    `;
+    banner.style.cssText = `
+        background-color: #0079d3;
+        color: white;
+        padding: 10px 15px;
+        margin-bottom: 10px;
+        border-radius: 4px;
+        cursor: pointer;
+        text-align: center;
+        font-weight: bold;
+        animation: pulse 2s infinite;
+    `;
+
+    // Add click handler to refresh the modal
+    banner.onclick = () => {
+        const cachedData = getCachedAgeData(username);
+        if (cachedData) {
+            // Close current modal
+            closeModalById(resultsModal.modalId);
+            // Open fresh modal with new data
+            showResultsModal(username, cachedData);
+        }
+    };
+
+    // Insert banner at the top of modal content
+    const modalContent = resultsModal.modal.querySelector('.age-modal-content');
+    if (modalContent) {
+        modalContent.insertBefore(banner, modalContent.firstChild);
+    }
 }
 
 function attachDeepAnalysisHandlers(modal, modalId, username) {
