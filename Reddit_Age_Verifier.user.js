@@ -2055,16 +2055,28 @@ function estimateCurrentAge(ageData) {
             consistencyScore = consistentPoints / (dataPoints.length - 1);
         }
 
+        // Calculate anomaly ratio for confidence determination
+        const anomalyRatio = dataPoints.length > 1 ? anomalies.length / (dataPoints.length - 1) : 0;
+
         // Determine confidence - heavily penalize if major jump was detected
         if (hasMajorJump) {
             // Major jump detected = maximum Low confidence
             confidence = 'Low';
-        } else if (dataPoints.length >= 10 && yearSpan >= 2 && rate >= 0.6 && rate <= 1.6 && consistencyScore >= 0.7 && anomalies.length === 0) {
+        } else if (dataPoints.length >= 10 && yearSpan >= 2 && rate >= 0.6 && rate <= 1.6 && consistencyScore >= 0.7 && anomalyRatio <= 0.05) {
+            // High confidence: 10+ points, 2+ years, good rate, high consistency, <5% anomalies
             confidence = 'High';
-        } else if (dataPoints.length >= 3 && yearSpan >= 2 && rate >= 0.7 && rate <= 1.5 && anomalies.length === 0) {
+        } else if (dataPoints.length >= 3 && yearSpan >= 2 && rate >= 0.7 && rate <= 1.5 && anomalyRatio <= 0.1) {
+            // High confidence: 3+ points, 2+ years, good rate, <10% anomalies
             confidence = 'High';
         } else if (dataPoints.length >= 2 && yearSpan >= 1 && rate >= 0.6 && rate <= 1.6) {
-            confidence = anomalies.length > 0 ? 'Low' : 'Medium';
+            // Medium or Low based on anomaly ratio
+            if (anomalyRatio > 0.2) {
+                confidence = 'Low';  // >20% anomalies
+            } else if (anomalyRatio > 0.1) {
+                confidence = 'Medium';  // 10-20% anomalies
+            } else {
+                confidence = 'Medium';  // <10% anomalies
+            }
         } else if (rate >= 0.5 && rate <= 2.0) {
             confidence = 'Low';
         } else {
@@ -2072,10 +2084,8 @@ function estimateCurrentAge(ageData) {
             confidence = 'Very Low';
         }
 
-        // Downgrade confidence if anomalies present
-        if (anomalies.length > 0 && confidence === 'High') {
-            confidence = 'Medium';
-        }
+        // Note: We no longer downgrade High to Medium just because anomalies exist
+        // The anomaly ratio is already factored into the confidence determination above
     }
 
     // Round to nearest 0.5
@@ -2933,31 +2943,66 @@ function estimateCurrentAgeFromPoints(points) {
 function calculateConsistencyScore(timelinePoints, backwardsAging) {
     if (timelinePoints.length < 2) return 100;
 
-    let score = 100;
-
-    // Penalize for backwards aging
-    score -= backwardsAging.length * 15;
-
-    // Check for reasonable progression
     const sorted = [...timelinePoints].sort((a, b) => a.timestamp - b.timestamp);
+    const totalTransitions = sorted.length - 1;
+
+    if (totalTransitions === 0) return 100;
+
+    let anomalyCount = 0;
+
+    // Count backwards aging anomalies
+    anomalyCount += backwardsAging.length;
+
+    // Count unrealistic aging rate anomalies
+    let unrealisticRates = 0;
     for (let i = 1; i < sorted.length; i++) {
         const timeDiff = (sorted[i].timestamp - sorted[i-1].timestamp) / (365.25 * 24 * 60 * 60);
         const ageDiff = sorted[i].age - sorted[i-1].age;
 
         if (timeDiff > 0) {
             const rate = ageDiff / timeDiff;
-            // Penalize for unrealistic aging rates
-            if (rate > 2) score -= 10;
-            if (rate < -0.5) score -= 15;
+            // Flag unrealistic rates (aging faster than 2x or backwards)
+            if (rate > 2 || rate < -0.5) {
+                unrealisticRates++;
+            }
         }
     }
 
-    // Calculate age spread penalty
+    // Total anomalies (but don't double-count backwards aging)
+    // Backwards aging will also be caught by unrealistic rates, so use the max
+    const totalAnomalies = Math.max(backwardsAging.length, unrealisticRates);
+
+    // Calculate anomaly percentage
+    const anomalyPercentage = (totalAnomalies / totalTransitions) * 100;
+
+    // Score based on percentage of clean transitions
+    let score;
+    if (anomalyPercentage === 0) {
+        score = 100;  // Perfect
+    } else if (anomalyPercentage < 1) {
+        score = 95;   // Excellent (>99% consistent)
+    } else if (anomalyPercentage < 5) {
+        score = 85;   // Very good (95-99% consistent)
+    } else if (anomalyPercentage < 10) {
+        score = 70;   // Good (90-95% consistent)
+    } else if (anomalyPercentage < 20) {
+        score = 50;   // Fair (80-90% consistent)
+    } else if (anomalyPercentage < 30) {
+        score = 30;   // Poor (70-80% consistent)
+    } else {
+        score = 10;   // Very poor (<70% consistent)
+    }
+
+    // Additional penalty for extreme age spread (likely multiple people or falsification)
     const ages = timelinePoints.map(p => p.age);
     const spread = Math.max(...ages) - Math.min(...ages);
-    if (spread > 5) score -= (spread - 5) * 5;
+    if (spread > 10) {
+        score = Math.max(0, score - 20);  // Large age spread is suspicious
+    } else if (spread > 5) {
+        score = Math.max(0, score - 10);  // Moderate spread
+    }
 
-    return Math.max(0, Math.min(100, score));
+    return Math.round(score);
 }
 
 function getCacheStatistics() {
@@ -3848,9 +3893,9 @@ function showDeepAnalysisModal(username, ageData, analysis) {
         <div class="age-modal-content">
             ${overviewHTML}
             ${anomaliesHTML}
-            ${subredditHTML}
             ${birthdayHTML}
             ${couplesHTML}
+            ${subredditHTML}
             ${timelineHTML}
 
             <div class="fetch-more-container">
