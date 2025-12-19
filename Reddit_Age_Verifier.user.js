@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.30
+// @version      1.31
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -80,6 +80,7 @@ const DEFAULT_SETTINGS = {
     modalHeight: 900, // default results modal height in pixels
     paginationLimit: 250,
     trackedSubreddits: [], // subreddits to compare age behavior against
+    minCouplesAgeGap: 10, // minimum age gap (years) to detect couples accounts
     commonBots: {
         AutoModerator: true,
         RepostSleuthBot: true,
@@ -1270,6 +1271,15 @@ function showSettingsModal() {
                 </div>
 
                 <div class="age-settings-row">
+                    <label class="age-settings-label">Minimum Age Gap for Couples Detection (years)</label>
+                    <input type="number" class="age-settings-input" id="setting-min-couples-gap"
+                           value="${userSettings.minCouplesAgeGap}" min="4" max="10" step="1">
+                </div>
+                <span class="age-settings-help-text" style="display: block; margin-top: -8px; margin-bottom: 12px;">
+                    Lower values (4-6) detect closer-age couples, higher (8-10) reduce false positives. Minimum: 4 years.
+                </span>
+
+                <div class="age-settings-row">
                     <label class="age-settings-label">Default Sort Order</label>
                     <select class="age-settings-input" id="setting-sort-order" style="width: 120px;">
                         <option value="oldest" ${userSettings.defaultSort === 'oldest' ? 'selected' : ''}>Oldest First</option>
@@ -1416,6 +1426,9 @@ function showSettingsModal() {
             .map(s => s.trim().replace(/^r\/|^\/r\//i, '').toLowerCase())
             .filter(s => s.length > 0);
 
+        const minCouplesGapInput = parseInt(modal.querySelector('#setting-min-couples-gap').value);
+        const minCouplesGapValidated = Math.max(4, Math.min(10, minCouplesGapInput)); // Clamp to 4-10
+
         const newSettings = {
             debugMode: modal.querySelector('#setting-debug').checked,
             minAge: parseInt(modal.querySelector('#setting-min-age').value),
@@ -1432,6 +1445,7 @@ function showSettingsModal() {
             autoFilterPosted: modal.querySelector('#setting-auto-filter').checked,
             ignoredUsers: userSettings.ignoredUsers, // Keep existing
             trackedSubreddits: trackedSubreddits,
+            minCouplesAgeGap: minCouplesGapValidated,
             commonBots: {}
         };
 
@@ -2511,9 +2525,10 @@ function detectCouplesAccountEnhanced(timelinePoints) {
     const track2Avg = track2Ages.reduce((a, b) => a + b, 0) / track2Ages.length;
     const avgAgeGap = Math.abs(track1Avg - track2Avg);
 
-    // If age gap is less than 10 years, unlikely to be couples (could just be inconsistent posting)
-    if (avgAgeGap < 10) {
-        result.explanation = `Age gap between clusters (${avgAgeGap.toFixed(1)} years) too small for couples detection`;
+    // If age gap is less than configured threshold, unlikely to be couples (could just be inconsistent posting)
+    const minGapThreshold = userSettings.minCouplesAgeGap || 10;
+    if (avgAgeGap < minGapThreshold) {
+        result.explanation = `Age gap between clusters (${avgAgeGap.toFixed(1)} years) too small for couples detection (threshold: ${minGapThreshold} years)`;
         return result;
     }
 
