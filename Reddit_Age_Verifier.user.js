@@ -2869,7 +2869,7 @@ function calculateConsistencyScore(timelinePoints, backwardsAging) {
 // PAGINATION SUPPORT
 // ============================================================================
 
-function searchUserAgesWithPagination(username, beforeTimestamp = null, limit = 250) {
+function searchUserAgesWithPagination(username, beforeTimestamp = null, limit = 500) {
     return new Promise((resolve, reject) => {
         if (!apiToken) {
             reject(new Error('No API token available'));
