@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.34
+// @version      1.35
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -4915,7 +4915,7 @@ function buildTimelineSection(analysis) {
                 <span class="timeline-age" style="color: ${entryClass === 'age-decrease' ? '#ff6b6b' : '#d7dadc'};">
                     Age: ${point.age}
                 </span>
-                <span class="timeline-subreddit">r/${point.subreddit}</span>
+                <span class="timeline-subreddit"><a href="https://old.reddit.com/r/${point.subreddit}" target="_blank">r/${point.subreddit}</a></span>
                 <span class="timeline-change">${changeText}</span>
             </div>
         `);
