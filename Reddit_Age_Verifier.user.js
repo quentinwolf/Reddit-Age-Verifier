@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.36
+// @version      1.37
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -989,6 +989,32 @@ GM_addStyle(`
         50% { opacity: 0.8; }
     }
 
+    .custom-button-editor {
+        cursor: move;
+        transition: opacity 0.2s, transform 0.2s;
+    }
+
+    .custom-button-editor.dragging {
+        opacity: 0.5;
+        transform: scale(0.98);
+    }
+
+    .custom-button-editor.drag-over {
+        border-top: 3px solid #0079d3;
+    }
+
+    .custom-button-drag-handle {
+        color: #818384;
+        font-size: 18px;
+        cursor: grab;
+        user-select: none;
+        margin-right: 8px;
+    }
+
+    .custom-button-drag-handle:active {
+        cursor: grabbing;
+    }
+
 `);
 
 // Debug Function to log messages to console if enabled at top of script
@@ -1384,13 +1410,16 @@ function showSettingsModal() {
 
                 <div id="custom-buttons-list">
                     ${userSettings.customButtons.map((btn, idx) => `
-                        <div class="custom-button-editor" data-index="${idx}" style="background-color: #1f1f21; padding: 12px; border-radius: 4px; margin-bottom: 10px;">
-                            <div class="age-settings-row" style="margin-bottom: 8px;">
-                                <input type="checkbox" class="age-settings-checkbox custom-btn-enabled"
-                                       ${btn.enabled ? 'checked' : ''} id="custombtn-enabled-${idx}">
-                                <label class="age-settings-label" for="custombtn-enabled-${idx}" style="flex: 0;">Enabled</label>
+                        <div class="custom-button-editor" data-index="${idx}" draggable="true" style="background-color: #1f1f21; padding: 12px; border-radius: 4px; margin-bottom: 10px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                                <span class="custom-button-drag-handle" title="Drag to reorder">⋮⋮</span>
                                 <button class="age-modal-button danger" style="margin: 0; padding: 4px 12px; font-size: 12px;"
                                         onclick="this.closest('.custom-button-editor').remove()">Delete</button>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                                <input type="checkbox" class="age-settings-checkbox custom-btn-enabled"
+                                       ${btn.enabled ? 'checked' : ''} id="custombtn-enabled-${idx}">
+                                <label class="age-settings-label" for="custombtn-enabled-${idx}" style="flex: 0; margin: 0;">Enabled</label>
                             </div>
                             <div class="age-settings-row">
                                 <label class="age-settings-label">Label:</label>
@@ -1605,52 +1634,54 @@ function showSettingsModal() {
 
                 // Re-attach remove handlers
                 attachRemoveHandlers(modal);
-
-                const addCustomButtonBtn = modal.querySelector('#add-custom-button');
-                console.log('Add button found:', addCustomButtonBtn); // Debug log
-                if (addCustomButtonBtn) {
-                    addCustomButtonBtn.onclick = () => {
-                        console.log('Add button clicked!'); // Debug log
-                        const buttonsList = modal.querySelector('#custom-buttons-list');
-                        const newIndex = modal.querySelectorAll('.custom-button-editor').length;
-
-                        const newButtonHTML = `
-                            <div class="custom-button-editor" data-index="${newIndex}" style="background-color: #1f1f21; padding: 12px; border-radius: 4px; margin-bottom: 10px;">
-                                <div class="age-settings-row" style="margin-bottom: 8px;">
-                                    <input type="checkbox" class="age-settings-checkbox custom-btn-enabled"
-                                           checked id="custombtn-enabled-${newIndex}">
-                                    <label class="age-settings-label" for="custombtn-enabled-${newIndex}" style="flex: 0;">Enabled</label>
-                                    <button class="age-modal-button danger" style="margin: 0; padding: 4px 12px; font-size: 12px;"
-                                            onclick="this.closest('.custom-button-editor').remove()">Delete</button>
-                                </div>
-                                <div class="age-settings-row">
-                                    <label class="age-settings-label">Label:</label>
-                                    <input type="text" class="age-settings-input custom-btn-label"
-                                           value="New Button" style="width: 200px;">
-                                </div>
-                                <div class="age-settings-row">
-                                    <label class="age-settings-label">URL Template:</label>
-                                    <input type="text" class="age-settings-input custom-btn-url"
-                                           value="https://example.com/{{author}}" style="width: 400px; font-family: monospace; font-size: 11px;">
-                                </div>
-                                <div class="age-settings-row">
-                                    <label class="age-settings-label">Button Style:</label>
-                                    <select class="age-settings-input custom-btn-style" style="width: 120px;">
-                                        <option value="primary" selected>Primary (Blue)</option>
-                                        <option value="secondary">Secondary (Gray)</option>
-                                        <option value="danger">Danger (Red)</option>
-                                    </select>
-                                </div>
-                            </div>
-                        `;
-
-                        buttonsList.insertAdjacentHTML('beforeend', newButtonHTML);
-                    };
-                }
-
             }
         }
     };
+
+    const addCustomButtonBtn = modal.querySelector('#add-custom-button');
+    console.log('Add button found:', addCustomButtonBtn); // Debug log
+    if (addCustomButtonBtn) {
+        addCustomButtonBtn.onclick = () => {
+            console.log('Add button clicked!'); // Debug log
+            const buttonsList = modal.querySelector('#custom-buttons-list');
+            const newIndex = modal.querySelectorAll('.custom-button-editor').length;
+
+            const newButtonHTML = `
+                <div class="custom-button-editor" data-index="${newIndex}" draggable="true" style="background-color: #1f1f21; padding: 12px; border-radius: 4px; margin-bottom: 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <span class="custom-button-drag-handle" title="Drag to reorder">⋮⋮</span>
+                        <button class="age-modal-button danger" style="margin: 0; padding: 4px 12px; font-size: 12px;"
+                                onclick="this.closest('.custom-button-editor').remove()">Delete</button>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                        <input type="checkbox" class="age-settings-checkbox custom-btn-enabled"
+                               checked id="custombtn-enabled-${newIndex}">
+                        <label class="age-settings-label" for="custombtn-enabled-${newIndex}" style="flex: 0; margin: 0;">Enabled</label>
+                    </div>
+                    <div class="age-settings-row">
+                        <label class="age-settings-label">Label:</label>
+                        <input type="text" class="age-settings-input custom-btn-label"
+                               value="New Button" style="width: 200px;">
+                    </div>
+                    <div class="age-settings-row">
+                        <label class="age-settings-label">URL Template:</label>
+                        <input type="text" class="age-settings-input custom-btn-url"
+                               value="https://example.com/{{author}}" style="width: 400px; font-family: monospace; font-size: 11px;">
+                    </div>
+                    <div class="age-settings-row">
+                        <label class="age-settings-label">Button Style:</label>
+                        <select class="age-settings-input custom-btn-style" style="width: 120px;">
+                            <option value="primary" selected>Primary (Blue)</option>
+                            <option value="secondary">Secondary (Gray)</option>
+                            <option value="danger">Danger (Red)</option>
+                        </select>
+                    </div>
+                </div>
+            `;
+
+            buttonsList.insertAdjacentHTML('beforeend', newButtonHTML);
+        };
+    }
 
     const clearProfileCacheBtn = modal.querySelector('#clear-profile-cache-btn');
     clearProfileCacheBtn.onclick = () => {
@@ -1701,6 +1732,83 @@ function showSettingsModal() {
             };
         });
     }
+
+// Drag and drop for custom buttons
+    function setupDragAndDrop() {
+        const buttonsList = modal.querySelector('#custom-buttons-list');
+        if (!buttonsList) return;
+
+        let draggedElement = null;
+
+        buttonsList.addEventListener('dragstart', (e) => {
+            if (e.target.classList.contains('custom-button-editor')) {
+                draggedElement = e.target;
+                e.target.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/html', e.target.innerHTML);
+            }
+        });
+
+        buttonsList.addEventListener('dragend', (e) => {
+            if (e.target.classList.contains('custom-button-editor')) {
+                e.target.classList.remove('dragging');
+            }
+            // Remove all drag-over classes
+            buttonsList.querySelectorAll('.custom-button-editor').forEach(el => {
+                el.classList.remove('drag-over');
+            });
+        });
+
+        buttonsList.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+
+            const afterElement = getDragAfterElement(buttonsList, e.clientY);
+            const draggable = draggedElement;
+
+            if (afterElement == null) {
+                buttonsList.appendChild(draggable);
+            } else {
+                buttonsList.insertBefore(draggable, afterElement);
+            }
+        });
+
+        buttonsList.addEventListener('dragenter', (e) => {
+            if (e.target.classList.contains('custom-button-editor') && e.target !== draggedElement) {
+                e.target.classList.add('drag-over');
+            }
+        });
+
+        buttonsList.addEventListener('dragleave', (e) => {
+            if (e.target.classList.contains('custom-button-editor')) {
+                e.target.classList.remove('drag-over');
+            }
+        });
+
+        function getDragAfterElement(container, y) {
+            const draggableElements = [...container.querySelectorAll('.custom-button-editor:not(.dragging)')];
+
+            return draggableElements.reduce((closest, child) => {
+                const box = child.getBoundingClientRect();
+                const offset = y - box.top - box.height / 2;
+
+                if (offset < 0 && offset > closest.offset) {
+                    return { offset: offset, element: child };
+                } else {
+                    return closest;
+                }
+            }, { offset: Number.NEGATIVE_INFINITY }).element;
+        }
+    }
+
+    setupDragAndDrop();
+
+    // Re-setup drag and drop when adding new buttons
+    const originalAddButtonHandler = addCustomButtonBtn.onclick;
+    addCustomButtonBtn.onclick = () => {
+        originalAddButtonHandler();
+        setupDragAndDrop();
+    };
 
     attachRemoveHandlers(modal);
 }
@@ -3854,10 +3962,10 @@ function showResultsModal(username, ageData) {
                     <button class="age-modal-close">&times;</button>
                 </div>
             </div>
+            ${customButtonsHTML}
             ${topbarHTML}
         </div>
         <div class="age-modal-content">
-            ${customButtonsHTML}
             ${resultsHTML}
         </div>
         <div class="age-modal-buttons">
