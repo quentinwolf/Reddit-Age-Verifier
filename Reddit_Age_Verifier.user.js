@@ -24,7 +24,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.35
+// @version      1.36
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -86,8 +86,13 @@ const DEFAULT_SETTINGS = {
         RepostSleuthBot: true,
         sneakpeekbot: true,
         RemindMeBot: true,
-        MTGCardFetcher: true
-    }
+        MTGCardFetcher: true,
+        magic_eye_bot: true,
+        auto_modmail: true,
+    },
+    customButtons: [
+        // Example: { id: 'clickme', label: 'Clickable Button', urlTemplate: 'https://someurl.here', enabled: true, style: 'danger' }
+    ]
 };
 
 let userSettings = null;
@@ -103,6 +108,10 @@ function loadSettings() {
             userSettings.commonBots = { ...DEFAULT_SETTINGS.commonBots };
         } else {
             userSettings.commonBots = { ...DEFAULT_SETTINGS.commonBots, ...userSettings.commonBots };
+        }
+        // Ensure customButtons exists
+        if (!userSettings.customButtons) {
+            userSettings.customButtons = [];
         }
     } else {
         userSettings = { ...DEFAULT_SETTINGS };
@@ -1365,6 +1374,51 @@ function showSettingsModal() {
                        placeholder="subreddit1, subreddit2, r/subreddit3">
             </div>
 
+            <!-- Custom Buttons -->
+            <div class="age-settings-section">
+                <div class="age-settings-section-title">🔘 Custom Action Buttons</div>
+                <p class="age-settings-help-text">
+                    Create custom buttons that appear in Results and Deep Analysis modals.<br>
+                    Available placeholders: {{author}}, {{age_min}}, {{age_max}}, {{posted_ages}}, {{possible_ages}}
+                </p>
+
+                <div id="custom-buttons-list">
+                    ${userSettings.customButtons.map((btn, idx) => `
+                        <div class="custom-button-editor" data-index="${idx}" style="background-color: #1f1f21; padding: 12px; border-radius: 4px; margin-bottom: 10px;">
+                            <div class="age-settings-row" style="margin-bottom: 8px;">
+                                <input type="checkbox" class="age-settings-checkbox custom-btn-enabled"
+                                       ${btn.enabled ? 'checked' : ''} id="custombtn-enabled-${idx}">
+                                <label class="age-settings-label" for="custombtn-enabled-${idx}" style="flex: 0;">Enabled</label>
+                                <button class="age-modal-button danger" style="margin: 0; padding: 4px 12px; font-size: 12px;"
+                                        onclick="this.closest('.custom-button-editor').remove()">Delete</button>
+                            </div>
+                            <div class="age-settings-row">
+                                <label class="age-settings-label">Label:</label>
+                                <input type="text" class="age-settings-input custom-btn-label"
+                                       value="${escapeHtml(btn.label)}" style="width: 200px;">
+                            </div>
+                            <div class="age-settings-row">
+                                <label class="age-settings-label">URL Template:</label>
+                                <input type="text" class="age-settings-input custom-btn-url"
+                                       value="${escapeHtml(btn.urlTemplate)}" style="width: 400px; font-family: monospace; font-size: 11px;">
+                            </div>
+                            <div class="age-settings-row">
+                                <label class="age-settings-label">Button Style:</label>
+                                <select class="age-settings-input custom-btn-style" style="width: 120px;">
+                                    <option value="primary" ${btn.style === 'primary' ? 'selected' : ''}>Primary (Blue)</option>
+                                    <option value="secondary" ${btn.style === 'secondary' ? 'selected' : ''}>Secondary (Gray)</option>
+                                    <option value="danger" ${btn.style === 'danger' ? 'selected' : ''}>Danger (Red)</option>
+                                </select>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+
+                <div class="age-settings-buttons-row">
+                    <button class="age-modal-button" id="add-custom-button">Add New Button</button>
+                </div>
+            </div>
+
             <!-- Ignored Users -->
             <div class="age-settings-section">
                 <div class="age-settings-section-title">Ignored Users</div>
@@ -1452,12 +1506,24 @@ function showSettingsModal() {
             ignoredUsers: userSettings.ignoredUsers, // Keep existing
             trackedSubreddits: trackedSubreddits,
             minCouplesAgeGap: minCouplesGapValidated,
+            customButtons: [],
             commonBots: {}
         };
 
         // Collect common bots settings
         modal.querySelectorAll('.common-bot-checkbox').forEach(checkbox => {
             newSettings.commonBots[checkbox.dataset.bot] = checkbox.checked;
+        });
+
+        // Collect custom buttons
+        modal.querySelectorAll('.custom-button-editor').forEach((editor, idx) => {
+            newSettings.customButtons.push({
+                id: `custom_btn_${Date.now()}_${idx}`,
+                label: editor.querySelector('.custom-btn-label').value,
+                urlTemplate: editor.querySelector('.custom-btn-url').value,
+                enabled: editor.querySelector('.custom-btn-enabled').checked,
+                style: editor.querySelector('.custom-btn-style').value
+            });
         });
 
         saveSettings(newSettings);
@@ -1539,6 +1605,49 @@ function showSettingsModal() {
 
                 // Re-attach remove handlers
                 attachRemoveHandlers(modal);
+
+                const addCustomButtonBtn = modal.querySelector('#add-custom-button');
+                console.log('Add button found:', addCustomButtonBtn); // Debug log
+                if (addCustomButtonBtn) {
+                    addCustomButtonBtn.onclick = () => {
+                        console.log('Add button clicked!'); // Debug log
+                        const buttonsList = modal.querySelector('#custom-buttons-list');
+                        const newIndex = modal.querySelectorAll('.custom-button-editor').length;
+
+                        const newButtonHTML = `
+                            <div class="custom-button-editor" data-index="${newIndex}" style="background-color: #1f1f21; padding: 12px; border-radius: 4px; margin-bottom: 10px;">
+                                <div class="age-settings-row" style="margin-bottom: 8px;">
+                                    <input type="checkbox" class="age-settings-checkbox custom-btn-enabled"
+                                           checked id="custombtn-enabled-${newIndex}">
+                                    <label class="age-settings-label" for="custombtn-enabled-${newIndex}" style="flex: 0;">Enabled</label>
+                                    <button class="age-modal-button danger" style="margin: 0; padding: 4px 12px; font-size: 12px;"
+                                            onclick="this.closest('.custom-button-editor').remove()">Delete</button>
+                                </div>
+                                <div class="age-settings-row">
+                                    <label class="age-settings-label">Label:</label>
+                                    <input type="text" class="age-settings-input custom-btn-label"
+                                           value="New Button" style="width: 200px;">
+                                </div>
+                                <div class="age-settings-row">
+                                    <label class="age-settings-label">URL Template:</label>
+                                    <input type="text" class="age-settings-input custom-btn-url"
+                                           value="https://example.com/{{author}}" style="width: 400px; font-family: monospace; font-size: 11px;">
+                                </div>
+                                <div class="age-settings-row">
+                                    <label class="age-settings-label">Button Style:</label>
+                                    <select class="age-settings-input custom-btn-style" style="width: 120px;">
+                                        <option value="primary" selected>Primary (Blue)</option>
+                                        <option value="secondary">Secondary (Gray)</option>
+                                        <option value="danger">Danger (Red)</option>
+                                    </select>
+                                </div>
+                            </div>
+                        `;
+
+                        buttonsList.insertAdjacentHTML('beforeend', newButtonHTML);
+                    };
+                }
+
             }
         }
     };
@@ -3734,6 +3843,8 @@ function showResultsModal(username, ageData) {
         resultsHTML += '</div>';
     }
 
+    const customButtonsHTML = renderCustomButtons(username, ageData);
+
     modal.innerHTML = `
         <div class="age-modal-header">
             <div class="age-modal-title-row">
@@ -3746,6 +3857,7 @@ function showResultsModal(username, ageData) {
             ${topbarHTML}
         </div>
         <div class="age-modal-content">
+            ${customButtonsHTML}
             ${resultsHTML}
         </div>
         <div class="age-modal-buttons">
@@ -3791,6 +3903,9 @@ function showResultsModal(username, ageData) {
     const resultItems = modal.querySelectorAll('.age-result-item');
     const filterStatusContainer = modal.querySelector('.age-filter-status-container');
     const contentContainer = modal.querySelector('.age-modal-content');
+
+    // Attach custom button handlers
+    attachCustomButtonHandlers(modal);
 
     const settingsBtn = modal.querySelector('.age-settings-gear');
     settingsBtn.onclick = (e) => {
@@ -4142,6 +4257,7 @@ function showDeepAnalysisModal(username, ageData, analysis) {
     modal.dataset.username = username;
 
     // Build section content
+    const customButtonsHTML = renderCustomButtons(username, ageData);
     const overviewHTML = buildOverviewSection(analysis);
     const timelineHTML = buildTimelineSection(analysis);
     const anomaliesHTML = buildAnomaliesSection(analysis);
@@ -4160,6 +4276,7 @@ function showDeepAnalysisModal(username, ageData, analysis) {
             </div>
         </div>
         <div class="age-modal-content">
+            ${customButtonsHTML}
             ${overviewHTML}
             ${anomaliesHTML}
             ${birthdayHTML}
@@ -4211,6 +4328,9 @@ function showDeepAnalysisModal(username, ageData, analysis) {
         e.stopPropagation();
         showSettingsModal();
     };
+
+    // Attach custom button handlers
+    attachCustomButtonHandlers(modal);
 
     // Collapsible sections
     modal.querySelectorAll('.deep-analysis-header').forEach(header => {
@@ -4937,6 +5057,56 @@ function buildTimelineSection(analysis) {
             </div>
         </div>
     `;
+}
+
+// ============================================================================
+// CUSTOM BUTTONS
+// ============================================================================
+
+function renderCustomButtons(username, ageData) {
+    const enabledButtons = userSettings.customButtons.filter(btn => btn.enabled);
+    if (enabledButtons.length === 0) {
+        return '';
+    }
+
+    const postedAges = ageData.postedAges || [];
+    const possibleAges = ageData.possibleAges || [];
+
+    const placeholders = {
+        author: username,
+        age_min: postedAges.length > 0 ? Math.min(...postedAges) : '',
+        age_max: postedAges.length > 0 ? Math.max(...postedAges) : '',
+        posted_ages: postedAges.join(','),
+        possible_ages: possibleAges.join(',')
+    };
+
+    const buttonsHTML = enabledButtons.map(btn => {
+        let url = btn.urlTemplate;
+        Object.keys(placeholders).forEach(key => {
+            url = url.replace(new RegExp(`{{${key}}}`, 'g'), placeholders[key]);
+        });
+
+        const styleClass = btn.style || 'primary';
+        return `<button class="age-modal-button ${styleClass === 'primary' ? '' : styleClass}"
+                        data-custom-url="${escapeHtml(url)}"
+                        data-button-id="${btn.id}">${escapeHtml(btn.label)}</button>`;
+    }).join('');
+
+    return `
+        <div class="age-custom-buttons-row" style="display: flex; gap: 10px; margin-bottom: 15px; padding: 12px; background-color: #1f1f21; border-radius: 6px;">
+            ${buttonsHTML}
+        </div>
+    `;
+}
+
+function attachCustomButtonHandlers(modal) {
+    modal.querySelectorAll('[data-custom-url]').forEach(btn => {
+        btn.onclick = (e) => {
+            e.preventDefault();
+            const url = btn.dataset.customUrl;
+            window.location.href = url;
+        };
+    });
 }
 
 function showLoadingModal(username) {
