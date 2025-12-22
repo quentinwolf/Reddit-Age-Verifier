@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.39
+// @version      1.40
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -4395,7 +4395,7 @@ function showManualSearchModal(prefillAuthor = null) {
                     </div>
                 </div>
 
-                <div class="manual-search-row">
+                <div class="manual-search-row" style="grid-template-columns: 1.2fr 1.5fr 1fr 1fr;">
                     <div class="manual-search-field">
                         <label class="manual-search-label">Search For</label>
                         <select class="manual-search-select" id="ms-kind">
@@ -4406,7 +4406,7 @@ function showManualSearchModal(prefillAuthor = null) {
                     <div class="manual-search-field">
                         <label class="manual-search-label">Number To Request</label>
                         <input type="number" class="manual-search-input" id="ms-limit"
-                               value="${userSettings.paginationLimit}" min="1" max="500">
+                               value="250" min="1">
                     </div>
                     <div class="manual-search-field">
                         <label class="manual-search-label">Min Score</label>
@@ -4643,7 +4643,7 @@ function showManualSearchResults(searchData) {
                         </div>
                     </div>
 
-                    <div class="manual-search-row">
+                    <div class="manual-search-row" style="grid-template-columns: 1.2fr 1.5fr 1fr 1fr;">
                         <div class="manual-search-field">
                             <label class="manual-search-label">Search For</label>
                             <select class="manual-search-select" id="ms-kind">
@@ -4654,7 +4654,7 @@ function showManualSearchResults(searchData) {
                         <div class="manual-search-field">
                             <label class="manual-search-label">Number To Request</label>
                             <input type="number" class="manual-search-input" id="ms-limit"
-                                   value="${params.limit}" min="1" max="500">
+                                   value="${params.limit}" min="1">
                         </div>
                         <div class="manual-search-field">
                             <label class="manual-search-label">Min Score</label>
