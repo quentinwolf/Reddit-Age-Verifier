@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.41
+// @version      1.42
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -68,6 +68,7 @@ const DEFAULT_SETTINGS = {
     debugMode: debugMode,
     minAge: MIN_AGE,
     maxAge: MAX_AGE,
+    defaultButtonText: 'PushShift',
     enableVeryLowConfidence: ENABLE_VERY_LOW_CONFIDENCE,
     titleSnippetLength: TITLE_SNIPPET_LENGTH,
     bodySnippetLength: BODY_SNIPPET_LENGTH,
@@ -1772,10 +1773,18 @@ function showSettingsModal() {
             <div class="age-settings-section">
                 <div class="age-settings-section-title">General Settings</div>
 
+
                 <div class="age-settings-row">
                     <label class="age-settings-label">Enable Debug Mode</label>
                     <input type="checkbox" class="age-settings-checkbox" id="setting-debug"
                            ${userSettings.debugMode ? 'checked' : ''}>
+                </div>
+
+                <div class="age-settings-row">
+                    <label class="age-settings-label">Default Button Text</label>
+                    <input type="text" class="age-settings-input" id="setting-button-text"
+                           value="${escapeHtml(userSettings.defaultButtonText)}"
+                           style="width: 150px;" placeholder="PushShift">
                 </div>
 
                 <div class="age-settings-row">
@@ -2010,6 +2019,7 @@ function showSettingsModal() {
         const minCouplesGapValidated = Math.max(4, Math.min(10, minCouplesGapInput)); // Clamp to 4-10
 
         const newSettings = {
+            defaultButtonText: modal.querySelector('#setting-button-text').value.trim() || 'PushShift',
             debugMode: modal.querySelector('#setting-debug').checked,
             minAge: parseInt(modal.querySelector('#setting-min-age').value),
             maxAge: parseInt(modal.querySelector('#setting-max-age').value),
@@ -6382,7 +6392,7 @@ function createAgeCheckButton(username) {
         button.textContent = buttonText;
         button.classList.add('cached');
     } else {
-        button.textContent = 'PushShift';
+        button.textContent = userSettings.defaultButtonText;
     }
 
     button.onclick = () => handleAgeCheck(username);
@@ -6398,7 +6408,7 @@ function updateButtonForUser(username) {
             button.textContent = buttonText;
             button.classList.add('cached');
         } else {
-            button.textContent = 'PushShift';
+            button.textContent = userSettings.defaultButtonText;
             button.classList.remove('cached');
         }
     });
