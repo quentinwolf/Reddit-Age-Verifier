@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.40
+// @version      1.41
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -2335,7 +2335,9 @@ function setCachedAgeData(username, data) {
 
 function clearUserCache(username) {
     delete ageCache[username];
+    delete buttonCache[username];
     GM_setValue('ageVerifierCache', JSON.stringify(ageCache));
+    GM_setValue('ageVerifierButtonCache', JSON.stringify(buttonCache));
 }
 
 function clearAllCache() {
