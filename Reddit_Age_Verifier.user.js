@@ -2196,10 +2196,10 @@ function showSettingsModal() {
 
     const clearButtonCacheBtn = modal.querySelector('#clear-button-cache-btn');
     clearButtonCacheBtn.onclick = () => {
-        if (confirm('Clear all cached button text? Buttons will show "Search" until age is checked again.')) {
+        if (confirm('Clear all cached button text? Buttons will show "PushShift" until age is checked again.')) {
             clearButtonCache();
 
-            // Update all cached buttons to show "Search"
+            // Update all cached buttons to show "PushShift"
             document.querySelectorAll('.age-check-button.cached').forEach(btn => {
                 const username = btn.dataset.username;
                 updateButtonForUser(username);
@@ -4515,7 +4515,7 @@ function showManualSearchModal(prefillAuthor = null) {
             console.error('Manual search error:', error);
             alert(`Search failed: ${error.message}`);
             searchBtn.disabled = false;
-            searchBtn.textContent = 'Search';
+            searchBtn.textContent = 'PushShift';
         }
     };
 
@@ -4770,7 +4770,7 @@ function showManualSearchResults(searchData) {
             console.error('Manual search error:', error);
             alert(`Search failed: ${error.message}`);
             searchBtn.disabled = false;
-            searchBtn.textContent = 'Search';
+            searchBtn.textContent = 'PushShift';
         }
     };
 
@@ -5008,10 +5008,10 @@ function showResultsModal(username, ageData) {
             ${resultsHTML}
         </div>
         <div class="age-modal-buttons">
-            <button class="age-modal-button manual-search">Manual Search</button>
             <button class="age-modal-button deep-analysis">Deep Analysis</button>
             <button class="age-modal-button recheck-age">Recheck Age</button>
             <button class="age-modal-button danger clear-user">Clear This User Cache</button>
+            <button class="age-modal-button manual-search">Manual Search</button>
             <button class="age-modal-button secondary">Close</button>
         </div>
     `;
@@ -5446,8 +5446,8 @@ function showDeepAnalysisModal(username, ageData, analysis) {
             </div>
         </div>
         <div class="age-modal-buttons">
-            <button class="age-modal-button manual-search-deep">Manual Search</button>
             <button class="age-modal-button" id="fetch-more-data">Fetch More Data (${userSettings.paginationLimit} posts)</button>
+            <button class="age-modal-button manual-search-deep">Manual Search</button>
             <button class="age-modal-button secondary">Close</button>
         </div>
     `;
@@ -6382,7 +6382,7 @@ function createAgeCheckButton(username) {
         button.textContent = buttonText;
         button.classList.add('cached');
     } else {
-        button.textContent = 'Search';
+        button.textContent = 'PushShift';
     }
 
     button.onclick = () => handleAgeCheck(username);
@@ -6398,7 +6398,7 @@ function updateButtonForUser(username) {
             button.textContent = buttonText;
             button.classList.add('cached');
         } else {
-            button.textContent = 'Search';
+            button.textContent = 'PushShift';
             button.classList.remove('cached');
         }
     });
