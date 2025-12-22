@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.38
+// @version      1.39
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -1017,6 +1017,139 @@ GM_addStyle(`
 
     .custom-button-drag-handle:active {
         cursor: grabbing;
+    }
+
+    /* Manual Search Styles */
+    .manual-search-form {
+        display: grid;
+        gap: 15px;
+    }
+
+    .manual-search-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 12px;
+    }
+
+    .manual-search-field {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+    }
+
+    .manual-search-label {
+        color: #d7dadc;
+        font-size: 11px;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .manual-search-input {
+        background-color: #272729;
+        border: 1px solid #343536;
+        border-radius: 4px;
+        color: #d7dadc;
+        padding: 8px 10px;
+        font-size: 13px;
+    }
+
+    .manual-search-input:focus {
+        outline: none;
+        border-color: #0079d3;
+    }
+
+    .manual-search-select {
+        background-color: #272729;
+        border: 1px solid #343536;
+        border-radius: 4px;
+        color: #d7dadc;
+        padding: 8px 10px;
+        font-size: 13px;
+        cursor: pointer;
+    }
+
+    .manual-search-checkbox-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 15px;
+        padding: 10px;
+        background-color: #1f1f21;
+        border-radius: 4px;
+    }
+
+    .manual-search-checkbox-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .manual-search-checkbox-item label {
+        color: #d7dadc;
+        font-size: 13px;
+        cursor: pointer;
+    }
+
+    .manual-result-item {
+        background-color: #272729;
+        padding: 15px;
+        margin-bottom: 12px;
+        border-radius: 4px;
+        border-left: 3px solid #0079d3;
+    }
+
+    .manual-result-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 10px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid #343536;
+    }
+
+    .manual-result-meta {
+        display: flex;
+        gap: 15px;
+        font-size: 12px;
+        color: #818384;
+        flex-wrap: wrap;
+    }
+
+    .manual-result-author {
+        color: #0079d3;
+        font-weight: bold;
+        text-decoration: none;
+    }
+
+    .manual-result-author:hover {
+        text-decoration: underline;
+    }
+
+    .manual-result-score {
+        color: #ff8c42;
+    }
+
+    .manual-result-title {
+        font-size: 15px;
+        font-weight: bold;
+        color: #d7dadc;
+        margin-bottom: 10px;
+    }
+
+    .manual-result-body {
+        color: #d7dadc;
+        font-size: 13px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+    }
+
+    .highlight-search-term {
+        background-color: #ff4500;
+        color: white;
+        padding: 2px 4px;
+        border-radius: 2px;
+        font-weight: bold;
     }
 
 `);
@@ -4112,6 +4245,543 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function performManualSearch(params) {
+    return new Promise((resolve, reject) => {
+        if (!apiToken) {
+            reject(new Error('No API token available'));
+            return;
+        }
+
+        const searchParams = new URLSearchParams();
+
+        // Add author if provided
+        if (params.author) {
+            searchParams.append('author', params.author);
+            if (params.exactAuthorMatch) {
+                searchParams.append('exact_author', 'true');
+            }
+        }
+
+        // Add subreddit if provided
+        if (params.subreddit) {
+            searchParams.append('subreddit', params.subreddit);
+        }
+
+        // Add search query if provided
+        if (params.query) {
+            searchParams.append('q', params.query);
+        }
+
+        // Add limit
+        searchParams.append('size', params.limit || 100);
+
+        // Add date filters
+        if (params.since) {
+            const sinceTimestamp = Math.floor(new Date(params.since).getTime() / 1000);
+            searchParams.append('after', sinceTimestamp);
+        }
+
+        if (params.until) {
+            const untilTimestamp = Math.floor(new Date(params.until).getTime() / 1000);
+            searchParams.append('before', untilTimestamp);
+        }
+
+        // Add score filters
+        if (params.minScore) {
+            searchParams.append('score', `>${params.minScore}`);
+        }
+        if (params.maxScore) {
+            searchParams.append('score', `<${params.maxScore}`);
+        }
+
+        // Add sorting
+        searchParams.append('sort', 'created_utc');
+        searchParams.append('order', 'desc');
+        searchParams.append('html_decode', 'True');
+
+        const endpoint = params.kind === 'comment' ? 'comment' : 'submission';
+        const url = `${PUSHSHIFT_API_BASE}/reddit/search/${endpoint}/?${searchParams}`;
+
+        logDebug('Manual search request:', params);
+
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: url,
+            headers: {
+                'Authorization': `Bearer ${apiToken}`
+            },
+            onload: function(response) {
+                if (response.status === 401 || response.status === 403) {
+                    clearToken();
+                    reject(new Error('Token expired or invalid'));
+                    return;
+                }
+
+                if (response.status !== 200) {
+                    reject(new Error(`PushShift API error: ${response.status}`));
+                    return;
+                }
+
+                try {
+                    const data = JSON.parse(response.responseText);
+                    const results = data.data || [];
+                    logDebug(`Manual search returned ${results.length} results`);
+                    resolve({ results, params });
+                } catch (error) {
+                    reject(new Error('Failed to parse API response'));
+                }
+            },
+            onerror: function() {
+                reject(new Error('Network error'));
+            },
+            ontimeout: function() {
+                reject(new Error('Request timed out'));
+            }
+        });
+    });
+}
+
+function highlightSearchTerms(text, searchTerms) {
+    if (!text || !searchTerms || searchTerms.length === 0) {
+        return escapeHtml(text || '');
+    }
+
+    let highlighted = escapeHtml(text);
+
+    // Split search terms by spaces and highlight each
+    searchTerms.forEach(term => {
+        if (term.length < 2) return; // Skip very short terms
+
+        const regex = new RegExp(`(${escapeRegExp(term)})`, 'gi');
+        highlighted = highlighted.replace(regex, '<span class="highlight-search-term">$1</span>');
+    });
+
+    return highlighted;
+}
+
+function escapeRegExp(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function showManualSearchModal(prefillAuthor = null) {
+    const modalId = `age-modal-${modalCounter++}`;
+
+    const modal = document.createElement('div');
+    modal.className = 'age-modal resizable';
+    modal.dataset.modalId = modalId;
+    modal.style.width = '700px';
+    modal.style.height = '600px';
+    modal.style.zIndex = ++zIndexCounter;
+
+    modal.innerHTML = `
+        <div class="age-modal-header">
+            <div class="age-modal-title-row">
+                <div class="age-modal-title">Manual PushShift Search</div>
+                <button class="age-modal-close">&times;</button>
+            </div>
+        </div>
+        <div class="age-modal-content">
+            <form class="manual-search-form" id="manual-search-form">
+                <div class="manual-search-row">
+                    <div class="manual-search-field">
+                        <label class="manual-search-label">Username</label>
+                        <input type="text" class="manual-search-input" id="ms-author"
+                               value="${prefillAuthor || ''}" placeholder="Enter username">
+                    </div>
+                    <div class="manual-search-field">
+                        <label class="manual-search-label">Subreddit</label>
+                        <input type="text" class="manual-search-input" id="ms-subreddit"
+                               placeholder="Enter subreddit">
+                    </div>
+                </div>
+
+                <div class="manual-search-row">
+                    <div class="manual-search-field">
+                        <label class="manual-search-label">Search For</label>
+                        <select class="manual-search-select" id="ms-kind">
+                            <option value="comment">Comments</option>
+                            <option value="submission">Posts</option>
+                        </select>
+                    </div>
+                    <div class="manual-search-field">
+                        <label class="manual-search-label">Number To Request</label>
+                        <input type="number" class="manual-search-input" id="ms-limit"
+                               value="${userSettings.paginationLimit}" min="1" max="500">
+                    </div>
+                    <div class="manual-search-field">
+                        <label class="manual-search-label">Min Score</label>
+                        <input type="number" class="manual-search-input" id="ms-min-score"
+                               placeholder="Optional">
+                    </div>
+                    <div class="manual-search-field">
+                        <label class="manual-search-label">Max Score</label>
+                        <input type="number" class="manual-search-input" id="ms-max-score"
+                               placeholder="Optional">
+                    </div>
+                </div>
+
+                <div class="manual-search-row">
+                    <div class="manual-search-field">
+                        <label class="manual-search-label">Since</label>
+                        <input type="datetime-local" class="manual-search-input" id="ms-since">
+                    </div>
+                    <div class="manual-search-field">
+                        <label class="manual-search-label">Until</label>
+                        <input type="datetime-local" class="manual-search-input" id="ms-until">
+                    </div>
+                </div>
+
+                <div class="manual-search-field">
+                    <label class="manual-search-label">Search Input</label>
+                    <input type="text" class="manual-search-input" id="ms-query"
+                           placeholder="Query or Reddit Object Fullname">
+                </div>
+
+                <div class="manual-search-checkbox-group">
+                    <div class="manual-search-checkbox-item">
+                        <input type="checkbox" id="ms-exact-author" checked>
+                        <label for="ms-exact-author">Exact Author Match</label>
+                    </div>
+                    <div class="manual-search-checkbox-item">
+                        <input type="checkbox" id="ms-highlight" checked>
+                        <label for="ms-highlight">Highlight Search Term(s)</label>
+                    </div>
+                </div>
+            </form>
+        </div>
+        <div class="age-modal-buttons">
+            <button class="age-modal-button" id="execute-manual-search">Search</button>
+            <button class="age-modal-button secondary">Cancel</button>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    makeDraggable(modal);
+    modal.addEventListener('mousedown', () => {
+        bringToFront(modal);
+        normalizeModalPosition(modal);
+    });
+
+    resultsModals.push({ modalId, modal, overlay: null, username: 'manual-search' });
+
+    const closeBtn = modal.querySelector('.age-modal-close');
+    const cancelBtn = modal.querySelector('.age-modal-buttons .secondary');
+    const searchBtn = modal.querySelector('#execute-manual-search');
+    const form = modal.querySelector('#manual-search-form');
+
+    const closeModal = () => {
+        document.body.removeChild(modal);
+        resultsModals = resultsModals.filter(m => m.modalId !== modalId);
+    };
+
+    closeBtn.onclick = closeModal;
+    cancelBtn.onclick = closeModal;
+
+    // Handle form submission
+    const executeSearch = async (e) => {
+        if (e) e.preventDefault();
+
+        const params = {
+            author: modal.querySelector('#ms-author').value.trim(),
+            subreddit: modal.querySelector('#ms-subreddit').value.trim(),
+            kind: modal.querySelector('#ms-kind').value,
+            limit: parseInt(modal.querySelector('#ms-limit').value) || 100,
+            minScore: modal.querySelector('#ms-min-score').value.trim(),
+            maxScore: modal.querySelector('#ms-max-score').value.trim(),
+            since: modal.querySelector('#ms-since').value,
+            until: modal.querySelector('#ms-until').value,
+            query: modal.querySelector('#ms-query').value.trim(),
+            exactAuthorMatch: modal.querySelector('#ms-exact-author').checked,
+            highlight: modal.querySelector('#ms-highlight').checked
+        };
+
+        // Validation
+        if (!params.author && !params.subreddit && !params.query) {
+            alert('Please enter at least one search criterion (Username, Subreddit, or Search Query)');
+            return;
+        }
+
+        searchBtn.disabled = true;
+        searchBtn.textContent = 'Searching...';
+
+        try {
+            const searchResults = await performManualSearch(params);
+            closeModal();
+            showManualSearchResults(searchResults);
+        } catch (error) {
+            console.error('Manual search error:', error);
+            alert(`Search failed: ${error.message}`);
+            searchBtn.disabled = false;
+            searchBtn.textContent = 'Search';
+        }
+    };
+
+    searchBtn.onclick = executeSearch;
+    form.onsubmit = executeSearch;
+
+    const newSearchBtn = modal.querySelector('#new-manual-search');
+    newSearchBtn.onclick = () => {
+        const currentAuthor = modal.querySelector('#ms-author').value.trim();
+        showManualSearchModal(currentAuthor || params.author);
+    };
+}
+
+function showManualSearchResults(searchData) {
+    const { results, params } = searchData;
+    const modalId = `age-modal-${modalCounter++}`;
+
+    const modal = document.createElement('div');
+    modal.className = 'age-modal resizable';
+    modal.dataset.modalId = modalId;
+    modal.style.width = `${userSettings.modalWidth}px`;
+    modal.style.height = `${userSettings.modalHeight}px`;
+    modal.style.zIndex = ++zIndexCounter;
+
+    const kindLabel = params.kind === 'comment' ? 'Comments' : 'Posts';
+
+    // Parse search terms for highlighting
+    const searchTerms = params.highlight && params.query
+        ? params.query.split(/\s+/).filter(t => t.length > 1)
+        : [];
+
+    // Build results HTML
+    let resultsHTML = '';
+    if (results.length === 0) {
+        resultsHTML = `<div class="age-summary">
+            <div class="age-summary-title">No Results Found</div>
+            <p>Your search returned no results. Try adjusting your search criteria.</p>
+        </div>`;
+    } else {
+        resultsHTML = `<div style="color: #46d160; font-weight: bold; margin-bottom: 15px; padding: 10px; background-color: #1f1f21; border-radius: 4px;">
+            Found ${results.length} ${results.length === 1 ? 'result' : 'results'}
+        </div>`;
+
+        resultsHTML += '<div class="age-results-container">';
+        results.forEach(result => {
+            const isComment = params.kind === 'comment';
+
+            // Format date
+            const postDate = new Date(result.created_utc * 1000);
+            const formattedDate = postDate.toLocaleString('en-US', {
+                weekday: 'short',
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+
+            // Build content
+            let contentHTML = '';
+            if (isComment) {
+                const body = result.body || '';
+                const highlightedBody = params.highlight
+                    ? highlightSearchTerms(body, searchTerms)
+                    : escapeHtml(body);
+
+                contentHTML = `<div class="manual-result-body">${highlightedBody}</div>`;
+            } else {
+                const title = result.title || '';
+                const selftext = result.selftext || '';
+
+                const highlightedTitle = params.highlight
+                    ? highlightSearchTerms(title, searchTerms)
+                    : escapeHtml(title);
+
+                const highlightedBody = params.highlight && selftext
+                    ? highlightSearchTerms(selftext, searchTerms)
+                    : escapeHtml(selftext);
+
+                contentHTML = `
+                    <div class="manual-result-title">${highlightedTitle}</div>
+                    ${selftext ? `<div class="manual-result-body">${highlightedBody}</div>` : ''}
+                `;
+            }
+
+            // Build permalink
+            const permalink = isComment
+                ? `https://reddit.com${result.permalink}`
+                : `https://reddit.com${result.permalink}`;
+
+            resultsHTML += `
+                <div class="manual-result-item">
+                    <div class="manual-result-header">
+                        <div class="manual-result-meta">
+                            <a href="https://reddit.com/user/${result.author}" target="_blank" class="manual-result-author">u/${result.author}</a>
+                            <a href="https://reddit.com/r/${result.subreddit}" target="_blank" style="color: #0079d3;">r/${result.subreddit}</a>
+                            <span class="manual-result-score">Score: ${result.score || 0}</span>
+                        </div>
+                        <span class="age-result-date">${formattedDate}</span>
+                    </div>
+                    ${contentHTML}
+                    <a href="${permalink}" target="_blank" class="age-result-link">View on Reddit →</a>
+                </div>
+            `;
+        });
+        resultsHTML += '</div>';
+    }
+
+    modal.innerHTML = `
+        <div class="age-modal-header">
+            <div class="age-modal-title-row">
+                <div class="age-modal-title">Manual Search Results</div>
+                <button class="age-modal-close">&times;</button>
+            </div>
+            <div class="age-modal-topbar" style="margin-top: 12px;">
+                <form class="manual-search-form" id="manual-search-form-results">
+                    <div class="manual-search-row">
+                        <div class="manual-search-field">
+                            <label class="manual-search-label">Username</label>
+                            <input type="text" class="manual-search-input" id="ms-author"
+                                   value="${params.author || ''}" placeholder="Enter username">
+                        </div>
+                        <div class="manual-search-field">
+                            <label class="manual-search-label">Subreddit</label>
+                            <input type="text" class="manual-search-input" id="ms-subreddit"
+                                   value="${params.subreddit || ''}" placeholder="Enter subreddit">
+                        </div>
+                    </div>
+
+                    <div class="manual-search-row">
+                        <div class="manual-search-field">
+                            <label class="manual-search-label">Search For</label>
+                            <select class="manual-search-select" id="ms-kind">
+                                <option value="comment" ${params.kind === 'comment' ? 'selected' : ''}>Comments</option>
+                                <option value="submission" ${params.kind === 'submission' ? 'selected' : ''}>Posts</option>
+                            </select>
+                        </div>
+                        <div class="manual-search-field">
+                            <label class="manual-search-label">Number To Request</label>
+                            <input type="number" class="manual-search-input" id="ms-limit"
+                                   value="${params.limit}" min="1" max="500">
+                        </div>
+                        <div class="manual-search-field">
+                            <label class="manual-search-label">Min Score</label>
+                            <input type="number" class="manual-search-input" id="ms-min-score"
+                                   value="${params.minScore || ''}" placeholder="Optional">
+                        </div>
+                        <div class="manual-search-field">
+                            <label class="manual-search-label">Max Score</label>
+                            <input type="number" class="manual-search-input" id="ms-max-score"
+                                   value="${params.maxScore || ''}" placeholder="Optional">
+                        </div>
+                    </div>
+
+                    <div class="manual-search-row">
+                        <div class="manual-search-field">
+                            <label class="manual-search-label">Since</label>
+                            <input type="datetime-local" class="manual-search-input" id="ms-since"
+                                   value="${params.since || ''}">
+                        </div>
+                        <div class="manual-search-field">
+                            <label class="manual-search-label">Until</label>
+                            <input type="datetime-local" class="manual-search-input" id="ms-until"
+                                   value="${params.until || ''}">
+                        </div>
+                    </div>
+
+                    <div class="manual-search-field">
+                        <label class="manual-search-label">Search Input</label>
+                        <input type="text" class="manual-search-input" id="ms-query"
+                               value="${params.query || ''}" placeholder="Query or Reddit Object Fullname">
+                    </div>
+
+                    <div class="manual-search-checkbox-group">
+                        <div class="manual-search-checkbox-item">
+                            <input type="checkbox" id="ms-exact-author" ${params.exactAuthorMatch ? 'checked' : ''}>
+                            <label for="ms-exact-author">Exact Author Match</label>
+                        </div>
+                        <div class="manual-search-checkbox-item">
+                            <input type="checkbox" id="ms-highlight" ${params.highlight ? 'checked' : ''}>
+                            <label for="ms-highlight">Highlight Search Term(s)</label>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <div class="age-modal-content">
+            ${resultsHTML}
+        </div>
+        <div class="age-modal-buttons">
+            <button class="age-modal-button" id="execute-manual-search-again">Search</button>
+            <button class="age-modal-button secondary" id="new-manual-search">New Search</button>
+            <button class="age-modal-button secondary">Close</button>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    makeDraggable(modal);
+    modal.addEventListener('mousedown', () => {
+        bringToFront(modal);
+        normalizeModalPosition(modal);
+    });
+
+    resultsModals.push({ modalId, modal, overlay: null, username: 'manual-results' });
+
+    const closeBtn = modal.querySelector('.age-modal-close');
+    const closeButton = modal.querySelector('.age-modal-buttons .secondary');
+    const searchBtn = modal.querySelector('#execute-manual-search-again');
+    const form = modal.querySelector('#manual-search-form-results');
+
+    const closeModal = () => {
+        document.body.removeChild(modal);
+        resultsModals = resultsModals.filter(m => m.modalId !== modalId);
+    };
+
+    closeBtn.onclick = closeModal;
+    closeButton.onclick = closeModal;
+
+    // Handle form submission
+    const executeSearch = async (e) => {
+        if (e) e.preventDefault();
+
+        const newParams = {
+            author: modal.querySelector('#ms-author').value.trim(),
+            subreddit: modal.querySelector('#ms-subreddit').value.trim(),
+            kind: modal.querySelector('#ms-kind').value,
+            limit: parseInt(modal.querySelector('#ms-limit').value) || 100,
+            minScore: modal.querySelector('#ms-min-score').value.trim(),
+            maxScore: modal.querySelector('#ms-max-score').value.trim(),
+            since: modal.querySelector('#ms-since').value,
+            until: modal.querySelector('#ms-until').value,
+            query: modal.querySelector('#ms-query').value.trim(),
+            exactAuthorMatch: modal.querySelector('#ms-exact-author').checked,
+            highlight: modal.querySelector('#ms-highlight').checked
+        };
+
+        // Validation
+        if (!newParams.author && !newParams.subreddit && !newParams.query) {
+            alert('Please enter at least one search criterion (Username, Subreddit, or Search Query)');
+            return;
+        }
+
+        searchBtn.disabled = true;
+        searchBtn.textContent = 'Searching...';
+
+        try {
+            const searchResults = await performManualSearch(newParams);
+            closeModal();
+            showManualSearchResults(searchResults);
+        } catch (error) {
+            console.error('Manual search error:', error);
+            alert(`Search failed: ${error.message}`);
+            searchBtn.disabled = false;
+            searchBtn.textContent = 'Search';
+        }
+    };
+
+    searchBtn.onclick = executeSearch;
+    form.onsubmit = executeSearch;
+
+    const newSearchBtn = modal.querySelector('#new-manual-search');
+    newSearchBtn.onclick = () => {
+        const currentAuthor = modal.querySelector('#ms-author').value.trim();
+        showManualSearchModal(currentAuthor || params.author);
+    };
+}
+
 function showResultsModal(username, ageData) {
     // Update button cache since we're displaying this data
     updateButtonCacheForUser(username, ageData);
@@ -4336,6 +5006,7 @@ function showResultsModal(username, ageData) {
             ${resultsHTML}
         </div>
         <div class="age-modal-buttons">
+            <button class="age-modal-button manual-search">Manual Search</button>
             <button class="age-modal-button deep-analysis">Deep Analysis</button>
             <button class="age-modal-button recheck-age">Recheck Age</button>
             <button class="age-modal-button danger clear-user">Clear This User Cache</button>
@@ -4425,6 +5096,11 @@ function showResultsModal(username, ageData) {
     deepAnalysisBtn.onclick = () => {
         const analysis = performDeepAnalysis(ageData, username);
         showDeepAnalysisModal(username, ageData, analysis);
+    };
+
+    const manualSearchBtn = modal.querySelector('.manual-search');
+    manualSearchBtn.onclick = () => {
+        showManualSearchModal(username);
     };
 
     // Age filter functionality with multi-select support
@@ -4768,6 +5444,7 @@ function showDeepAnalysisModal(username, ageData, analysis) {
             </div>
         </div>
         <div class="age-modal-buttons">
+            <button class="age-modal-button manual-search-deep">Manual Search</button>
             <button class="age-modal-button" id="fetch-more-data">Fetch More Data (${userSettings.paginationLimit} posts)</button>
             <button class="age-modal-button secondary">Close</button>
         </div>
@@ -4802,6 +5479,11 @@ function showDeepAnalysisModal(username, ageData, analysis) {
     settingsBtn.onclick = (e) => {
         e.stopPropagation();
         showSettingsModal();
+    };
+
+    const manualSearchBtn = modal.querySelector('.manual-search-deep');
+    manualSearchBtn.onclick = () => {
+        showManualSearchModal(username);
     };
 
     // Attach custom button handlers
