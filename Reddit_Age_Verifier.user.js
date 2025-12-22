@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Reddit Age Verifier
+// @name         Reddit Details Verifier
 // @namespace    RedditAgeVerifier
-// @description  Check user ages using PushShift API to verify posting history
+// @description  Search via PushShift API to verify posting history
 // @include      http://*.reddit.com/*
 // @include      https://*.reddit.com/*
 // @include      https://auth.pushshift.io/*
@@ -2196,10 +2196,10 @@ function showSettingsModal() {
 
     const clearButtonCacheBtn = modal.querySelector('#clear-button-cache-btn');
     clearButtonCacheBtn.onclick = () => {
-        if (confirm('Clear all cached button text? Buttons will show "Check Age" until age is checked again.')) {
+        if (confirm('Clear all cached button text? Buttons will show "Search" until age is checked again.')) {
             clearButtonCache();
 
-            // Update all cached buttons to show "Check Age"
+            // Update all cached buttons to show "Search"
             document.querySelectorAll('.age-check-button.cached').forEach(btn => {
                 const username = btn.dataset.username;
                 updateButtonForUser(username);
@@ -6380,7 +6380,7 @@ function createAgeCheckButton(username) {
         button.textContent = buttonText;
         button.classList.add('cached');
     } else {
-        button.textContent = 'Check Age';
+        button.textContent = 'Search';
     }
 
     button.onclick = () => handleAgeCheck(username);
@@ -6396,7 +6396,7 @@ function updateButtonForUser(username) {
             button.textContent = buttonText;
             button.classList.add('cached');
         } else {
-            button.textContent = 'Check Age';
+            button.textContent = 'Search';
             button.classList.remove('cached');
         }
     });
