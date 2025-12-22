@@ -4,6 +4,8 @@
 // @description  Check user ages using PushShift API to verify posting history
 // @include      http://*.reddit.com/*
 // @include      https://*.reddit.com/*
+// @include      https://auth.pushshift.io/*
+// @include      https://*.reddit.com/api/v1/authorize*
 // @exclude      https://*.reddit.com/prefs/*
 // @exclude      https://*.reddit.com/r/*/wiki/*
 // @exclude      https://*.reddit.com/r/*/about/edit/*
@@ -16,7 +18,6 @@
 // @exclude      https://*.reddit.com/r/*/about/muted/*
 // @exclude      https://*.reddit.com/r/*/about/flair/*
 // @exclude      https://*.reddit.com/r/*/about/log/*
-// @exclude      https://*.reddit.com/api/*
 // @exclude      https://*.reddit.com/message/*
 // @exclude      https://*.reddit.com/report*
 // @exclude      https://chat.reddit.com*
@@ -24,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.37
+// @version      1.38
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -207,6 +208,9 @@ let tokenModal = null;
 let resultsModals = []; // Array to track multiple result modals
 let modalCounter = 0;   // Counter for unique modal IDs
 let zIndexCounter = 10000; // Counter for z-index management
+
+let oauthFlowTimestamp = 0; // Track when we initiated OAuth flow
+const OAUTH_FLOW_TIMEOUT = 60 * 1000; // 60 seconds
 
 // ============================================================================
 // STYLES
@@ -1052,14 +1056,314 @@ function clearToken() {
 }
 
 function attemptAutoFetchToken() {
-    // Auto-fetch is not reliable due to CORS and redirect handling
-    // Users need to manually visit the auth URL and paste the token
-    logDebug("Age Verifier: Auto-fetch not supported, showing manual token entry");
-    return false;
+    logDebug("Age Verifier: Opening OAuth flow for auto-submission");
+
+    // Set timestamp to validate auto-submit
+    oauthFlowTimestamp = Date.now();
+    GM_setValue('oauthFlowTimestamp', oauthFlowTimestamp);
+
+    // Open auth window
+    const authWindow = window.open(
+        PUSHSHIFT_AUTH_URL,
+        'PushShiftAuth',
+        'width=600,height=700,left=100,top=100'
+    );
+
+    if (!authWindow) {
+        logDebug("Age Verifier: Popup blocked - falling back to manual");
+        return false;
+    }
+
+    return true;
+}
+
+function handleOAuthAutoClick() {
+    // Only run on Reddit OAuth authorize page
+    if (!window.location.href.includes('reddit.com/api/v1/authorize')) {
+        return;
+    }
+
+    // Security check 1: Verify this is PushShift OAuth request
+    const url = new URL(window.location.href);
+    const redirectUri = url.searchParams.get('redirect_uri');
+
+    if (!redirectUri || !redirectUri.includes('auth.pushshift.io/callback')) {
+        logDebug("Age Verifier: OAuth page detected but not for PushShift - ignoring");
+        return;
+    }
+
+    // Security check 2: Verify we recently initiated this flow
+    const storedTimestamp = GM_getValue('oauthFlowTimestamp', 0);
+    const now = Date.now();
+    const timeSinceInitiated = now - storedTimestamp;
+
+    if (timeSinceInitiated > OAUTH_FLOW_TIMEOUT) {
+        logDebug(`Age Verifier: OAuth page opened but flow not recently initiated (${Math.round(timeSinceInitiated/1000)}s ago) - ignoring`);
+        return;
+    }
+
+    logDebug("Age Verifier: Detected PushShift OAuth page - auto-submitting form");
+
+    // Clear the timestamp
+    GM_setValue('oauthFlowTimestamp', 0);
+
+    const autoSubmitForm = () => {
+        // Find the OAuth form
+        const form = document.querySelector('form.pretty-form, form[action*="authorize"]');
+
+        if (!form) {
+            logDebug("Age Verifier: Form not found yet, retrying...");
+            setTimeout(autoSubmitForm, 300);
+            return;
+        }
+
+        // Verify this is the right form (has the Allow button)
+        const allowButton = form.querySelector('input[name="authorize"][value="Allow"]');
+        if (!allowButton) {
+            logDebug("Age Verifier: Allow button not found in form, retrying...");
+            setTimeout(autoSubmitForm, 300);
+            return;
+        }
+
+        logDebug("Age Verifier: Found OAuth form - extracting data");
+
+        // Extract all form data
+        const formData = new FormData(form);
+
+        // Set authorize to "Allow"
+        formData.set('authorize', 'Allow');
+
+        // Get the form action URL
+        const formAction = form.action;
+
+        logDebug("Age Verifier: Submitting to:", formAction);
+
+        // Convert FormData to URL params
+        const params = new URLSearchParams(formData);
+
+        // Submit the form via GM_xmlhttpRequest
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: formAction,
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            data: params.toString(),
+            onload: function(response) {
+                logDebug("Age Verifier: OAuth form submitted, status:", response.status);
+                logDebug("Age Verifier: Final URL:", response.finalUrl);
+
+                // Check if we got redirected to the callback
+                if (response.finalUrl && response.finalUrl.includes('auth.pushshift.io/callback')) {
+                    logDebug("Age Verifier: Redirected to callback, extracting token from response");
+
+                    try {
+                        // Parse the JSON response
+                        const tokenData = JSON.parse(response.responseText);
+                        const token = tokenData.access_token;
+
+                        if (token) {
+                            logDebug("Age Verifier: Token extracted:", token.substring(0, 20) + '...');
+
+                            // Save the token
+                            saveToken(token);
+
+                            // Set a flag that the parent window can detect
+                            GM_setValue('oauthFlowComplete', Date.now());
+                            logDebug("Age Verifier: Set completion flag");
+
+                            // Show success and close window
+                            document.body.innerHTML = `
+                                <div style="font-family: Arial; padding: 40px; text-align: center; background: #1a1a1b; color: #d7dadc; min-height: 100vh;">
+                                    <h2 style="color: #46d160;">✓ Token Captured Successfully!</h2>
+                                    <p>This window will close automatically...</p>
+                                </div>
+                            `;
+
+                            setTimeout(() => window.close(), 2000);
+
+                        }
+                    } catch (e) {
+                        logDebug("Age Verifier: Failed to parse token from response:", e);
+                        logDebug("Age Verifier: Response text:", response.responseText.substring(0, 200));
+
+                        // Try regex extraction as fallback
+                        const tokenMatch = response.responseText.match(/"access_token"\s*:\s*"([^"]+)"/);
+                        if (tokenMatch && tokenMatch[1]) {
+                            const token = tokenMatch[1];
+                            logDebug("Age Verifier: Token extracted via regex:", token.substring(0, 20) + '...');
+                            saveToken(token);
+
+                            document.body.innerHTML = `
+                                <div style="font-family: Arial; padding: 40px; text-align: center; background: #1a1a1b; color: #d7dadc; min-height: 100vh;">
+                                    <h2 style="color: #46d160;">✓ Token Captured Successfully!</h2>
+                                    <p>This window will close automatically...</p>
+                                </div>
+                            `;
+
+                            setTimeout(() => window.close(), 2000);
+                        }
+                    }
+                } else {
+                    logDebug("Age Verifier: Unexpected response, not redirected to callback");
+                    logDebug("Age Verifier: Response:", response.responseText.substring(0, 500));
+                }
+            },
+            onerror: function(response) {
+                logDebug("Age Verifier: Error submitting OAuth form:", response);
+            }
+        });
+    };
+
+    // Wait for page to load
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => setTimeout(autoSubmitForm, 500));
+    } else {
+        setTimeout(autoSubmitForm, 500);
+    }
+}
+
+function handleCallbackTokenExtraction() {
+    // Only run on PushShift callback page
+    if (!window.location.href.includes('auth.pushshift.io/callback')) {
+        return;
+    }
+
+    console.log("[Age Verifier] On callback page - extracting token");
+    console.log("[Age Verifier] Document ready state:", document.readyState);
+    console.log("[Age Verifier] Body HTML:", document.body?.innerHTML);
+
+    const extractToken = () => {
+        console.log("[Age Verifier] Attempting token extraction...");
+
+        try {
+            let bodyText = '';
+
+            // Method 1: Check for <pre> tag (JSON displayed as plain text)
+            const preElement = document.querySelector('pre');
+            if (preElement) {
+                bodyText = preElement.textContent;
+                console.log("[Age Verifier] Found <pre> element with content:", bodyText.substring(0, 100));
+            } else {
+                // Method 2: Try body.textContent
+                bodyText = document.body?.textContent || '';
+                console.log("[Age Verifier] Using body.textContent:", bodyText.substring(0, 100));
+            }
+
+            if (!bodyText) {
+                console.log("[Age Verifier] No content found yet, retrying...");
+                setTimeout(extractToken, 300);
+                return false;
+            }
+
+            // Try to parse as JSON
+            let tokenData;
+            try {
+                tokenData = JSON.parse(bodyText);
+            } catch (e) {
+                // Maybe it's wrapped in extra text, try regex
+                const jsonMatch = bodyText.match(/\{[^}]*"access_token"\s*:\s*"([^"]+)"[^}]*\}/);
+                if (jsonMatch && jsonMatch[1]) {
+                    tokenData = { access_token: jsonMatch[1] };
+                } else {
+                    console.log("[Age Verifier] Could not parse JSON, retrying...");
+                    setTimeout(extractToken, 300);
+                    return false;
+                }
+            }
+
+            const token = tokenData.access_token;
+
+            if (!token) {
+                console.log("[Age Verifier] No access_token in JSON, retrying...");
+                setTimeout(extractToken, 300);
+                return false;
+            }
+
+            console.log("[Age Verifier] Token extracted successfully:", token.substring(0, 20) + '...');
+
+            // Send token back to opener window
+            if (window.opener && !window.opener.closed) {
+                console.log("[Age Verifier] Sending token to opener window");
+
+                // Try all possible Reddit origins
+                const possibleOrigins = [
+                    'https://old.reddit.com',
+                    'https://www.reddit.com',
+                    'https://mod.reddit.com',
+                    '*' // Wildcard as fallback (less secure but for testing)
+                ];
+
+                possibleOrigins.forEach(origin => {
+                    try {
+                        window.opener.postMessage({
+                            type: 'PUSHSHIFT_TOKEN',
+                            token: token
+                        }, origin);
+                        console.log("[Age Verifier] Sent message to origin:", origin);
+                    } catch (e) {
+                        console.log("[Age Verifier] Failed to send to origin:", origin, e);
+                    }
+                });
+
+                // Show success message
+                document.body.innerHTML = `
+                    <div style="font-family: Arial; padding: 40px; text-align: center; background: #1a1a1b; color: #d7dadc; min-height: 100vh;">
+                        <h2 style="color: #46d160;">✓ Token Captured Successfully!</h2>
+                        <p>This window will close automatically...</p>
+                        <p style="font-size: 12px; color: #818384; margin-top: 20px;">Token: ${token.substring(0, 30)}...</p>
+                    </div>
+                `;
+
+                // Close window after brief delay
+                setTimeout(() => {
+                    console.log("[Age Verifier] Closing callback window");
+                    window.close();
+                }, 2000);
+
+                return true;
+            } else {
+                console.log("[Age Verifier] No opener window found");
+
+                // Fallback: Display token for manual copy
+                document.body.innerHTML = `
+                    <div style="font-family: Arial; padding: 40px; text-align: center; background: #1a1a1b; color: #d7dadc; min-height: 100vh;">
+                        <h2>Token Retrieved</h2>
+                        <p>Copy this token and paste it into the Age Verifier:</p>
+                        <input type="text" value="${token}" readonly
+                               style="width: 80%; padding: 10px; font-family: monospace; font-size: 14px; background: #272729; color: #d7dadc; border: 1px solid #343536;"
+                               onclick="this.select()">
+                        <br><br>
+                        <button onclick="navigator.clipboard.writeText('${token}').then(() => alert('Copied!'))"
+                                style="padding: 10px 20px; background: #0079d3; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                            Copy to Clipboard
+                        </button>
+                    </div>
+                `;
+                return true;
+            }
+        } catch (error) {
+            console.error("[Age Verifier] Error extracting token:", error);
+            setTimeout(extractToken, 500);
+            return false;
+        }
+    };
+
+    // Start extraction immediately and retry if needed
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => setTimeout(extractToken, 100));
+    } else {
+        setTimeout(extractToken, 100);
+    }
 }
 
 function showTokenModal(pendingUsername = null) {
     if (tokenModal) return; // Already showing
+
+    // Store pending username for auto-resume after token capture
+    if (pendingUsername) {
+        GM_setValue('pendingAgeCheck', pendingUsername);
+    }
 
     const overlay = document.createElement('div');
     overlay.className = 'age-modal-overlay';
@@ -1111,6 +1415,19 @@ function showTokenModal(pendingUsername = null) {
         showSettingsModal();
     };
 
+    // Add auto-fetch button
+    const autoFetchBtn = document.createElement('button');
+    autoFetchBtn.className = 'age-modal-button';
+    autoFetchBtn.textContent = 'Auto-Fetch Token (OAuth)';
+    autoFetchBtn.style.marginTop = '10px';
+    autoFetchBtn.onclick = () => {
+        attemptAutoFetchToken();
+        modal.querySelector('.age-token-input').placeholder = 'Waiting for OAuth flow...';
+    };
+
+    const modalContent = modal.querySelector('.age-modal-content');
+    modalContent.appendChild(autoFetchBtn);
+
     const closeModal = () => {
         document.body.removeChild(overlay);
         document.body.removeChild(modal);
@@ -1137,6 +1454,45 @@ function showTokenModal(pendingUsername = null) {
             alert('Please enter a valid token.');
         }
     };
+
+    // Poll for OAuth completion flag
+    const checkInterval = setInterval(() => {
+        const completionTime = GM_getValue('oauthFlowComplete', 0);
+
+        if (completionTime > 0) {
+            logDebug("Age Verifier: Detected OAuth completion flag");
+
+            // Clear the flag
+            GM_setValue('oauthFlowComplete', 0);
+
+            // Stop polling
+            clearInterval(checkInterval);
+
+            // Reload the token into memory
+            loadToken();
+
+            // Close the token modal
+            closeModal();
+
+            // Get the pending username
+            const userToCheck = GM_getValue('pendingAgeCheck', null);
+            GM_setValue('pendingAgeCheck', null);
+
+            // If there was a pending username, automatically continue the age check
+            if (userToCheck) {
+                logDebug("Age Verifier: Continuing with pending check for:", userToCheck);
+                setTimeout(() => {
+                    handleAgeCheck(userToCheck);
+                }, 100);
+            }
+        }
+    }, 500); // Check every 500ms
+
+    // Cleanup: stop polling after 5 minutes
+    setTimeout(() => {
+        clearInterval(checkInterval);
+        logDebug("Age Verifier: OAuth polling timeout");
+    }, 5 * 60 * 1000);
 
     input.focus();
 }
@@ -1271,7 +1627,9 @@ function showSettingsModal() {
                 <div class="age-settings-buttons-row" style="margin-top: 15px;">
                     <button class="age-modal-button danger" id="clear-profile-cache-btn">Clear Profile Cache</button>
                     <button class="age-modal-button danger" id="clear-button-cache-btn">Clear Button Cache</button>
+                    <button class="age-modal-button danger" id="clear-token-btn">Clear API Token</button>
                 </div>
+
                 <span class="age-settings-help-text" style="display: block; margin-top: 8px;">
                     Profile cache stores full age data. Button cache stores display text only.
                 </span>
@@ -1691,6 +2049,15 @@ function showSettingsModal() {
             // Refresh the settings modal to update statistics
             closeModal();
             showSettingsModal();
+        }
+    };
+
+    const clearTokenBtn = modal.querySelector('#clear-token-btn');
+    clearTokenBtn.onclick = () => {
+        if (confirm('Clear stored API token? You will need to authorize again.')) {
+            clearToken();
+            closeModal();
+            alert('API token cleared!');
         }
     };
 
@@ -5473,6 +5840,32 @@ document.addEventListener('keydown', function(e) {
         }
     }
 });
+
+// Initialize OAuth handlers
+handleOAuthAutoClick();
+
+
+// Debug helper functions (accessible from console)
+window.ageVerifierDebug = {
+    clearToken: function() {
+        clearToken();
+        console.log('[Age Verifier] Token cleared');
+    },
+    clearCache: function() {
+        clearAllCache();
+        console.log('[Age Verifier] Cache cleared');
+    },
+    getToken: function() {
+        const tokenData = JSON.parse(GM_getValue('pushShiftToken', 'null'));
+        if (tokenData && tokenData.token) {
+            console.log('[Age Verifier] Token exists:', tokenData.token.substring(0, 20) + '...');
+            console.log('[Age Verifier] Token age:', Math.round((Date.now() - tokenData.timestamp) / 1000 / 60), 'minutes');
+        } else {
+            console.log('[Age Verifier] No token stored');
+        }
+    }
+};
+
 
 logDebug(`Reddit Age Verifier ready for ${isModReddit ? 'mod.reddit.com' : 'old.reddit.com'}`);
 logDebug(`Checking ages ${MIN_AGE}-${MAX_AGE} using PushShift API with exact_author=true`);
