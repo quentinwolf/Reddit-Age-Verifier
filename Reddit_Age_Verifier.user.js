@@ -2056,7 +2056,17 @@ function showSettingsModal() {
             });
         });
 
+        const oldButtonText = userSettings.defaultButtonText;
         saveSettings(newSettings);
+
+        // Update existing non-cached buttons if default text changed
+        if (oldButtonText !== newSettings.defaultButtonText) {
+            document.querySelectorAll('.age-check-button:not(.cached)').forEach(btn => {
+                if (btn.textContent === oldButtonText) {
+                    btn.textContent = newSettings.defaultButtonText;
+                }
+            });
+        }
 
         // If sort order changed, update all currently open results modals
         if (oldSortOrder !== newSettings.defaultSort) {
