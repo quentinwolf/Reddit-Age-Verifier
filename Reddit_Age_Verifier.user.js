@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.45
+// @version      1.46
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -81,7 +81,10 @@ const DEFAULT_SETTINGS = {
         border: '#343536',
         success: '#46d160',
         warning: '#ff8c42',
-        danger: '#ea0027'
+        danger: '#ea0027',
+        analysisHeader: '#1f1f21',
+        analysisHeaderHover: '#2a2a2c',
+        anomalyBg: '#4a1c1c'
     },
     enableVeryLowConfidence: ENABLE_VERY_LOW_CONFIDENCE,
     titleSnippetLength: TITLE_SNIPPET_LENGTH,
@@ -121,7 +124,10 @@ const THEME_PRESETS = {
         border: '#343536',
         success: '#46d160',
         warning: '#ff8c42',
-        danger: '#ea0027'
+        danger: '#ea0027',
+        analysisHeader: '#1f1f21',
+        analysisHeaderHover: '#2a2a2c',
+        anomalyBg: '#4a1c1c'
     },
     light: {
         primary: '#0079d3',
@@ -132,7 +138,10 @@ const THEME_PRESETS = {
         border: '#ccc',
         success: '#46d160',
         warning: '#ff8c42',
-        danger: '#ea0027'
+        danger: '#ea0027',
+        analysisHeader: '#e8e9ea',
+        analysisHeaderHover: '#d8d9da',
+        anomalyBg: '#ffe5e5'
     },
     'high-contrast': {
         primary: '#0099ff',
@@ -143,7 +152,10 @@ const THEME_PRESETS = {
         border: '#ffffff',
         success: '#00ff00',
         warning: '#ffaa00',
-        danger: '#ff0000'
+        danger: '#ff0000',
+        analysisHeader: '#0a0a0a',
+        analysisHeaderHover: '#1f1f1f',
+        anomalyBg: '#330000'
     }
 };
 
@@ -206,6 +218,9 @@ function applyTheme() {
     document.documentElement.style.setProperty('--av-success', colors.success);
     document.documentElement.style.setProperty('--av-warning', colors.warning);
     document.documentElement.style.setProperty('--av-danger', colors.danger);
+    document.documentElement.style.setProperty('--av-analysis-header', colors.analysisHeader);
+    document.documentElement.style.setProperty('--av-analysis-header-hover', colors.analysisHeaderHover);
+    document.documentElement.style.setProperty('--av-anomaly-bg', colors.anomalyBg);
     document.documentElement.style.setProperty('--av-button-default', userSettings.buttonDefaultColor);
     document.documentElement.style.setProperty('--av-button-cached', userSettings.buttonCachedColor);
 }
@@ -290,987 +305,1009 @@ const OAUTH_FLOW_TIMEOUT = 60 * 1000; // 60 seconds
 // ============================================================================
 
 GM_addStyle(`
-    /* Cascade layer for isolation */
-    @layer av-ui;
-
-    @layer av-ui {
-        @scope (.av-ui-root) {
-            /* Selective reset to escape external styling */
-            :scope, :scope * {
-                box-sizing: border-box !important;
-                /* Reset only properties commonly affected by dark mode extensions */
-                color: inherit !important;
-                background: inherit !important;
-                border-color: inherit !important;
-            }
-
-            /* Re-establish baseline */
-            :scope {
-                color: var(--av-text) !important;
-                background-color: var(--av-background) !important;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif !important;
-                font-size: 14px !important;
-                line-height: 1.4 !important;
-                color-scheme: dark !important;
-            }
-
-            /* Button styles */
-            .age-check-button {
-                margin: 3px;
-                padding: 2px 6px;
-                background-color: var(--av-primary);
-                color: white;
-                border: none;
-                border-radius: 4px;
-                cursor: pointer;
-                font-size: 11px;
-                font-weight: bold;
-            }
-
-            .age-check-button:hover {
-                background-color: #005ba1;
-            }
-
-            .age-check-button.cached {
-                background-color: var(--av-success);
-            }
-
-            .age-check-button.cached:hover {
-                background-color: #37a84e;
-            }
-
-            .age-modal {
-                position: fixed !important;
-                top: 50% !important;
-                left: 50% !important;
-                transform: translate(-50%, -50%) !important;
-                background-color: var(--av-background) !important;
-                color: var(--av-text) !important;
-                border: 2px solid var(--av-border) !important;
-                border-radius: 8px !important;
-                padding: 0 !important;
-                z-index: 10000 !important;
-                min-width: 400px !important;
-                min-height: 300px !important;
-                max-width: 95vw !important;
-                max-height: 95vh !important;
-                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.5) !important;
-                display: flex !important;
-                flex-direction: column !important;
-            }
-
-            .age-modal-overlay {
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background-color: rgba(0, 0, 0, 0.3);
-                z-index: 9999;
-                pointer-events: none;  /* Allow clicking through to background */
-            }
-
-            .age-modal-header {
-                display: flex !important;
-                flex-direction: column !important;
-                gap: 12px !important;
-                padding: 15px 20px !important;
-                border-bottom: 1px solid var(--av-border) !important;
-                user-select: none !important;
-                flex-shrink: 0 !important;
-            }
-
-            .age-modal-title-row {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                width: 100%;
-                gap: 12px;
-                cursor: move;  /* Drag handle */
-            }
-
-            .age-modal-title {
-                font-size: 18px;
-                font-weight: bold;
-                color: var(--av-text);
-            }
-
-            .age-modal-close {
-                background: none !important;
-                border: none !important;
-                color: var(--av-text-muted) !important;
-                font-size: 24px !important;
-                cursor: pointer !important;
-                padding: 0 !important;
-                width: 30px !important;
-                height: 30px !important;
-                line-height: 30px !important;
-                text-align: center !important;
-            }
-
-            .age-modal-close:hover {
-                color: var(--av-text);
-            }
-
-            .age-modal-content {
-                padding: 20px !important;
-                overflow-y: auto !important;
-                flex: 1 !important;
-                min-height: 0 !important;
-            }
-
-            .age-modal-topbar {
-                width: 100%;
-                background-color: #1f1f21;
-                border: 1px solid var(--av-border);
-                border-radius: 6px;
-                padding: 12px 14px;
-                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
-            }
-
-            .age-token-input {
-                width: 100%;
-                padding: 8px;
-                background-color: var(--av-surface);
-                border: 1px solid var(--av-border);
-                border-radius: 4px;
-                color: var(--av-text);
-                font-family: monospace;
-                font-size: 12px;
-                margin-top: 10px;
-            }
-
-            .age-modal-button {
-                padding: 8px 16px !important;
-                background-color: var(--av-primary) !important;
-                color: white !important;
-                border: none !important;
-                border-radius: 4px !important;
-                cursor: pointer !important;
-                font-weight: bold !important;
-                margin-right: 10px !important;
-            }
-
-            .age-modal-button:hover {
-                background-color: #005ba1 !important;
-            }
-
-            .age-modal-button.secondary {
-                background-color: var(--av-border) !important;
-            }
-
-            .age-modal-button.secondary:hover {
-                background-color: #4a4a4b !important;
-            }
-
-            .age-modal-button.danger {
-                background-color: var(--av-danger) !important;
-            }
-
-            .age-modal-button.danger:hover {
-                background-color: #c20022 !important;
-            }
-
-            .age-summary {
-                background-color: var(--av-surface);
-                padding: 15px;
-                border-radius: 4px;
-                margin-bottom: 15px;
-                border-left: 4px solid var(--av-primary);
-            }
-
-            .age-summary-title {
-                margin-bottom: 4px;
-                color: var(--av-text);
-            }
-
-            .age-filter-chips {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 8px;
-                margin-top: 10px;
-            }
-
-            .age-chip {
-                display: inline-block;
-                padding: 4px 12px;
-                background-color: var(--av-primary);
-                color: white;
-                border-radius: 16px;
-                cursor: pointer;
-                font-size: 13px;
-                font-weight: bold;
-                transition: background-color 0.2s;
-            }
-
-            .age-chip:hover {
-                background-color: #005ba1;
-            }
-
-            .age-chip.possible {
-                background-color: var(--av-text-muted);
-            }
-
-            .age-chip.possible:hover {
-                background-color: #6b6c6e;
-            }
-
-            .age-chip.active {
-                background-color: #ff4500;
-            }
-
-            .age-chip.active:hover {
-                background-color: #cc3700;
-            }
-
-            .age-chip.posted.active {
-                background-color: #2d8a44;
-            }
-
-            .age-chip.posted.active:hover {
-                background-color: #237035;
-            }
-
-            .age-chip.possible.active {
-                background-color: var(--av-warning);
-            }
-
-            .age-chip.possible.active:hover {
-                background-color: #e67a32;
-            }
-
-            .age-filter-status-container {
-                margin-top: 10px;
-            }
-
-            .age-filter-status {
-                background-color: #ff4500;
-                color: white;
-                padding: 8px 12px;
-                border-radius: 4px;
-                margin-bottom: 10px;
-                cursor: pointer;
-                font-size: 13px;
-            }
-
-            .age-filter-status:hover {
-                background-color: #cc3700;
-            }
-
-            .age-results-container {
-                margin-bottom: 15px;
-            }
-
-            .age-result-item {
-                background-color: var(--av-surface);
-                padding: 12px;
-                margin-bottom: 10px;
-                border-radius: 4px;
-                border-left: 3px solid var(--av-primary);
-            }
-
-            .age-result-item.hidden {
-                display: none;
-            }
-
-            .age-result-header {
-                display: flex;
-                justify-content: space-between;
-                margin-bottom: 8px;
-                font-size: 13px;
-            }
-
-            .age-result-age {
-                font-weight: bold;
-                color: #ff4500;
-                font-size: 14px;
-            }
-
-            .age-result-date {
-                color: var(--av-text-muted);
-            }
-
-            .age-result-subreddit {
-                color: var(--av-primary);
-                font-weight: normal;
-            }
-
-            .age-result-snippet {
-                color: var(--av-text);
-                font-size: 12px;
-                margin: 8px 0;
-                line-height: 1.4;
-            }
-
-            .age-result-link {
-                color: var(--av-primary);
-                text-decoration: none;
-                font-size: 11px;
-            }
-
-            .age-result-link:hover {
-                text-decoration: underline;
-            }
-
-            .age-error {
-                background-color: #4a1c1c;
-                color: #ff6b6b;
-                padding: 12px;
-                border-radius: 4px;
-                border-left: 4px solid var(--av-danger);
-            }
-
-            .age-loading {
-                text-align: center;
-                padding: 20px;
-                color: var(--av-text-muted);
-            }
-
-            .age-loading::after {
-                content: '...';
-                animation: dots 1.5s steps(4, end) infinite;
-            }
-
-            @keyframes dots {
-                0%, 20% { content: '.'; }
-                40% { content: '..'; }
-                60%, 100% { content: '...'; }
-            }
-
-            .age-modal-buttons {
-                display: flex;
-                justify-content: flex-start;
-                gap: 10px;
-                padding: 15px 20px;
-                border-top: 1px solid var(--av-border);
-                flex-shrink: 0;
-            }
-
-            .age-link-text {
-                color: var(--av-primary);
-                margin: 10px 0;
-            }
-
-            .age-link-text a {
-                color: var(--av-primary);
-                text-decoration: underline;
-            }
-
-            .age-link-text a:hover {
-                color: #005ba1;
-            }
-
-            /* Resizable modal */
-            .age-modal.resizable {
-                resize: both;
-                overflow: hidden;
-            }
-
-            .highlight-age {
-                background-color: #ff4500;
-                color: white;
-                padding: 2px 4px;
-                border-radius: 2px;
-                font-weight: bold;
-            }
-
-            .highlight-age.posted {
-                background-color: var(--av-success);
-                color: white;
-            }
-
-            .highlight-age.possible {
-                background-color: var(--av-warning);
-                color: white;
-            }
-
-            .expand-link,
-            .collapse-link {
-                color: var(--av-primary);
-                cursor: pointer;
-                font-size: 11px;
-                font-weight: bold;
-                text-decoration: none;
-                user-select: none;
-            }
-
-            .expand-link:hover,
-            .collapse-link:hover {
-                color: #005ba1;
-                text-decoration: underline;
-            }
-
-            .snippet-content {
-                word-wrap: break-word;
-            }
-
-            /* Settings Modal Specific Styles */
-            .age-settings-section {
-                margin-bottom: 25px;
-                padding-bottom: 20px;
-                border-bottom: 1px solid var(--av-border);
-            }
-
-            .age-settings-section:last-child {
-                border-bottom: none;
-                margin-bottom: 0;
-            }
-
-            .age-settings-section-title {
-                font-size: 16px;
-                font-weight: bold;
-                color: var(--av-text);
-                margin-bottom: 15px;
-            }
-
-            .age-settings-row {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                margin-bottom: 12px;
-                gap: 15px;
-            }
-
-            .age-settings-label {
-                color: var(--av-text);
-                font-size: 13px;
-                flex: 1;
-            }
-
-            .age-settings-input {
-                background-color: var(--av-surface);
-                border: 1px solid var(--av-border);
-                border-radius: 4px;
-                color: var(--av-text);
-                padding: 6px 10px;
-                font-size: 13px;
-                width: 80px;
-            }
-
-            .age-settings-input:focus {
-                outline: none;
-                border-color: var(--av-primary);
-            }
-
-            .age-settings-checkbox {
-                width: 18px;
-                height: 18px;
-                cursor: pointer;
-            }
-
-            .age-settings-textarea {
-                width: 100%;
-                min-height: 100px;
-                background-color: var(--av-surface);
-                border: 1px solid var(--av-border);
-                border-radius: 4px;
-                color: var(--av-text);
-                padding: 8px;
-                font-size: 12px;
-                font-family: monospace;
-                resize: vertical;
-            }
-
-            .age-settings-textarea:focus {
-                outline: none;
-                border-color: var(--av-primary);
-            }
-
-            .age-ignored-users-list {
-                max-height: 150px;
-                overflow-y: auto;
-                background-color: var(--av-surface);
-                border: 1px solid var(--av-border);
-                border-radius: 4px;
-                padding: 8px;
-                margin-top: 10px;
-            }
-
-            .age-ignored-user-item {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                padding: 4px 8px;
-                margin-bottom: 4px;
-                background-color: var(--av-background);
-                border-radius: 3px;
-            }
-
-            .age-ignored-user-name {
-                color: var(--av-text);
-                font-size: 12px;
-                font-family: monospace;
-            }
-
-            .age-ignored-user-remove {
-                background-color: var(--av-danger);
-                color: white;
-                border: none;
-                border-radius: 3px;
-                padding: 2px 8px;
-                font-size: 11px;
-                cursor: pointer;
-                font-weight: bold;
-            }
-
-            .age-ignored-user-remove:hover {
-                background-color: #c20022;
-            }
-
-            .age-settings-bot-list {
-                display: grid;
-                grid-template-columns: repeat(2, 1fr);
-                gap: 10px;
-                margin-top: 10px;
-            }
-
-            .age-settings-bot-item {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-            }
-
-            .age-settings-bot-label {
-                color: var(--av-text);
-                font-size: 12px;
-                font-family: monospace;
-            }
-
-            .age-settings-buttons-row {
-                display: flex;
-                gap: 10px;
-                margin-top: 15px;
-            }
-
-            .age-settings-gear {
-                background: none;
-                border: none;
-                color: var(--av-text-muted);
-                font-size: 20px;
-                cursor: pointer;
-                padding: 0;
-                width: 30px;
-                height: 30px;
-                line-height: 30px;
-                text-align: center;
-                margin-left: 10px;
-            }
-
-            .age-settings-gear:hover {
-                color: var(--av-text);
-            }
-
-            .age-settings-help-text {
-                color: var(--av-text-muted);
-                font-size: 11px;
-                margin-top: 5px;
-                font-style: italic;
-            }
-
-            /* Deep Analysis Modal Styles */
-            .deep-analysis-section {
-                background-color: var(--av-surface);
-                border: 1px solid var(--av-border);
-                border-radius: 6px;
-                margin-bottom: 15px;
-                overflow: hidden;
-            }
-
-            .deep-analysis-header {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                padding: 12px 15px;
-                background-color: #1f1f21;
-                cursor: pointer;
-                user-select: none;
-            }
-
-            .deep-analysis-header:hover {
-                background-color: #2a2a2c;
-            }
-
-            .deep-analysis-title {
-                font-weight: bold;
-                font-size: 14px;
-                color: var(--av-text);
-            }
-
-            .deep-analysis-toggle {
-                color: var(--av-text-muted);
-                font-size: 12px;
-            }
-
-            .deep-analysis-copy {
-                background: none;
-                border: none;
-                color: var(--av-text-muted);
-                font-size: 16px;
-                cursor: pointer;
-                padding: 0 8px;
-                transition: color 0.2s;
-            }
-
-            .deep-analysis-copy:hover {
-                color: var(--av-text);
-            }
-
-            .deep-analysis-copy.copied {
-                color: var(--av-success);
-            }
-
-            .deep-analysis-content {
-                padding: 15px;
-                border-top: 1px solid var(--av-border);
-            }
-
-            .deep-analysis-content.collapsed {
-                display: none;
-            }
-
-            .analysis-stat-row {
-                display: flex;
-                justify-content: space-between;
-                padding: 8px 0;
-                border-bottom: 1px solid var(--av-border);
-            }
-
-            .analysis-stat-row:last-child {
-                border-bottom: none;
-            }
-
-            .analysis-stat-label {
-                color: var(--av-text-muted);
-                font-size: 13px;
-            }
-
-            .analysis-stat-value {
-                color: var(--av-text);
-                font-size: 13px;
-                font-weight: 500;
-            }
-
-            .analysis-stat-value.warning {
-                color: var(--av-warning);
-            }
-
-            .analysis-stat-value.danger {
-                color: #ff6b6b;
-            }
-
-            .analysis-stat-value.success {
-                color: var(--av-success);
-            }
-
-            .analysis-stat-value.info {
-                color: var(--av-primary);
-            }
-
-            .timeline-entry {
-                display: flex;
-                padding: 8px 12px;
-                border-left: 3px solid var(--av-border);
-                margin-bottom: 8px;
-                background-color: #1f1f21;
-                border-radius: 0 4px 4px 0;
-            }
-
-            .timeline-entry.age-increase {
-                border-left-color: var(--av-success);
-            }
-
-            .timeline-entry.age-decrease {
-                border-left-color: #ff6b6b;
-            }
-
-            .timeline-entry.age-same {
-                border-left-color: var(--av-text-muted);
-            }
-
-            .timeline-entry.first-post {
-                border-left-color: var(--av-primary);
-            }
-
-            .timeline-date {
-                color: var(--av-text-muted);
-                font-size: 11px;
-                min-width: 140px;
-            }
-
-            .timeline-age {
-                font-weight: bold;
-                min-width: 60px;
-            }
-
-            .timeline-subreddit {
-                color: var(--av-primary);
-                font-size: 12px;
-                min-width: 150px;
-            }
-
-            .timeline-change {
-                color: var(--av-text-muted);
-                font-size: 12px;
-                flex: 1;
-            }
-
-            .subreddit-comparison-table {
-                width: 100%;
-                border-collapse: collapse;
-                font-size: 13px;
-            }
-
-            .subreddit-comparison-table th {
-                text-align: left;
-                padding: 8px;
-                background-color: #1f1f21;
-                color: var(--av-text-muted);
-                font-weight: normal;
-                border-bottom: 1px solid var(--av-border);
-            }
-
-            .subreddit-comparison-table td {
-                padding: 8px;
-                border-bottom: 1px solid var(--av-border);
-                color: var(--av-text);
-            }
-
-            .subreddit-comparison-table tr:last-child td {
-                border-bottom: none;
-            }
-
-            .couples-track {
-                background-color: #1f1f21;
-                border: 1px solid var(--av-border);
-                border-radius: 4px;
-                padding: 12px;
-                margin-bottom: 10px;
-            }
-
-            .couples-track-title {
-                font-weight: bold;
-                margin-bottom: 8px;
-                color: var(--av-text);
-            }
-
-            .birthday-estimate {
-                background-color: #1f1f21;
-                border-radius: 4px;
-                padding: 15px;
-                text-align: center;
-            }
-
-            .birthday-month-range {
-                font-size: 18px;
-                font-weight: bold;
-                color: var(--av-primary);
-                margin-bottom: 5px;
-            }
-
-            .birthday-confidence {
-                font-size: 12px;
-                color: var(--av-text-muted);
-            }
-
-            .fetch-more-container {
-                text-align: center;
-                padding: 15px;
-                border-top: 1px solid var(--av-border);
-                margin-top: 15px;
-            }
-
-            .fetch-more-status {
-                color: var(--av-text-muted);
-                font-size: 12px;
-                margin-top: 8px;
-            }
-
-            .anomaly-item {
-                background-color: #4a1c1c;
-                border-left: 3px solid #ff6b6b;
-                padding: 10px 12px;
-                margin-bottom: 8px;
-                border-radius: 0 4px 4px 0;
-            }
-
-            .anomaly-description {
-                color: #ff6b6b;
-                font-size: 13px;
-            }
-
-            .anomaly-date {
-                color: var(--av-text-muted);
-                font-size: 11px;
-                margin-top: 4px;
-            }
-
-            @keyframes pulse {
-                0%, 100% { opacity: 1; }
-                50% { opacity: 0.8; }
-            }
-
-            .custom-button-editor {
-                cursor: move;
-                transition: opacity 0.2s, transform 0.2s;
-            }
-
-            .custom-button-editor.dragging {
-                opacity: 0.5;
-                transform: scale(0.98);
-            }
-
-            .custom-button-editor.drag-over {
-                border-top: 3px solid var(--av-primary);
-            }
-
-            .custom-button-drag-handle {
-                color: var(--av-text-muted);
-                font-size: 18px;
-                cursor: grab;
-                user-select: none;
-                margin-right: 8px;
-            }
-
-            .custom-button-drag-handle:active {
-                cursor: grabbing;
-            }
-
-            /* Manual Search Styles */
-            .manual-search-form {
-                display: grid;
-                gap: 15px;
-            }
-
-            .manual-search-row {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                gap: 12px;
-            }
-
-            .manual-search-field {
-                display: flex;
-                flex-direction: column;
-                gap: 5px;
-            }
-
-            .manual-search-label {
-                color: var(--av-text);
-                font-size: 11px;
-                font-weight: bold;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-            }
-
-            .manual-search-input {
-                background-color: var(--av-surface);
-                border: 1px solid var(--av-border);
-                border-radius: 4px;
-                color: var(--av-text);
-                padding: 8px 10px;
-                font-size: 13px;
-            }
-
-            .manual-search-input:focus {
-                outline: none;
-                border-color: var(--av-primary);
-            }
-
-            .manual-search-select {
-                background-color: var(--av-surface);
-                border: 1px solid var(--av-border);
-                border-radius: 4px;
-                color: var(--av-text);
-                padding: 8px 10px;
-                font-size: 13px;
-                cursor: pointer;
-            }
-
-            .manual-search-checkbox-group {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 15px;
-                padding: 10px;
-                background-color: #1f1f21;
-                border-radius: 4px;
-            }
-
-            .manual-search-checkbox-item {
-                display: flex;
-                align-items: center;
-                gap: 6px;
-            }
-
-            .manual-search-checkbox-item label {
-                color: var(--av-text);
-                font-size: 13px;
-                cursor: pointer;
-            }
-
-            .manual-result-item {
-                background-color: var(--av-surface);
-                padding: 15px;
-                margin-bottom: 12px;
-                border-radius: 4px;
-                border-left: 3px solid var(--av-primary);
-            }
-
-            .manual-result-header {
-                display: flex;
-                justify-content: space-between;
-                align-items: flex-start;
-                margin-bottom: 10px;
-                padding-bottom: 8px;
-                border-bottom: 1px solid var(--av-border);
-            }
-
-            .manual-result-meta {
-                display: flex;
-                gap: 15px;
-                font-size: 12px;
-                color: var(--av-text-muted);
-                flex-wrap: wrap;
-            }
-
-            .manual-result-author {
-                color: var(--av-primary);
-                font-weight: bold;
-                text-decoration: none;
-            }
-
-            .manual-result-author:hover {
-                text-decoration: underline;
-            }
-
-            .manual-result-score {
-                color: var(--av-warning);
-            }
-
-            .manual-result-title {
-                font-size: 15px;
-                font-weight: bold;
-                color: var(--av-text);
-                margin-bottom: 10px;
-            }
-
-            .manual-result-body {
-                color: var(--av-text);
-                font-size: 13px;
-                line-height: 1.5;
-                white-space: pre-wrap;
-                word-wrap: break-word;
-            }
-
-            .highlight-search-term {
-                background-color: #ff4500;
-                color: white;
-                padding: 2px 4px;
-                border-radius: 2px;
-                font-weight: bold;
-            }
-
-        } /* end @scope */
-
-    } /* end @layer */
+    .age-check-button {
+        margin: 3px;
+        padding: 2px 6px;
+        background-color: var(--av-primary);
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: bold;
+    }
+
+    .age-check-button:hover {
+        background-color: #005ba1;
+    }
+
+    .age-check-button.cached {
+        background-color: var(--av-success);
+    }
+
+    .age-check-button.cached:hover {
+        background-color: #37a84e;
+    }
+
+    .age-modal {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background-color: var(--av-background);
+        color: var(--av-text);
+        border: 2px solid var(--av-border);
+        border-radius: 8px;
+        padding: 0;
+        z-index: 10000;
+        min-width: 400px;
+        min-height: 300px;
+        max-width: 95vw;
+        max-height: 95vh;  /* <-- Increased to 95% */
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.5);
+        display: flex;
+        flex-direction: column;
+    }
+
+    .age-modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.3);
+        z-index: 9999;
+        pointer-events: none;  /* Allow clicking through to background */
+    }
+
+    .age-modal-header {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 15px 20px;
+        border-bottom: 1px solid var(--av-border);
+        user-select: none;
+        flex-shrink: 0;
+    }
+
+    .age-modal-title-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        width: 100%;
+        gap: 12px;
+        cursor: move;  /* Drag handle */
+    }
+
+    .age-modal-title {
+        font-size: 18px;
+        font-weight: bold;
+        color: var(--av-text);
+    }
+
+    .age-modal-close {
+        background: none;
+        border: none;
+        color: var(--av-text-muted);
+        font-size: 24px;
+        cursor: pointer;
+        padding: 0;
+        width: 30px;
+        height: 30px;
+        line-height: 30px;
+        text-align: center;
+    }
+
+    .age-modal-close:hover {
+        color: var(--av-text);
+    }
+
+    .age-modal-content {
+        padding: 20px;
+        overflow-y: auto;
+        flex: 1;
+        min-height: 0;
+    }
+
+    .age-modal-topbar {
+        width: 100%;
+        background-color: var(--av-surface);
+        border: 1px solid var(--av-border);
+        border-radius: 6px;
+        padding: 12px 14px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
+    }
+
+    .age-token-input {
+        width: 100%;
+        padding: 8px;
+        background-color: var(--av-surface);
+        border: 1px solid var(--av-border);
+        border-radius: 4px;
+        color: var(--av-text);
+        font-family: monospace;
+        font-size: 12px;
+        margin-top: 10px;
+    }
+
+    .age-modal-button {
+        padding: 8px 16px;
+        background-color: var(--av-primary);
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: bold;
+        margin-right: 10px;
+    }
+
+    .age-modal-button:hover {
+        background-color: #005ba1;
+    }
+
+    .age-modal-button.secondary {
+        background-color: var(--av-border);
+    }
+
+    .age-modal-button.secondary:hover {
+        background-color: #4a4a4b;
+    }
+
+    .age-modal-button.danger {
+        background-color: var(--av-danger);
+    }
+
+    .age-modal-button.danger:hover {
+        background-color: #c20022;
+    }
+
+    .age-summary {
+        background-color: var(--av-surface);
+        padding: 15px;
+        border-radius: 4px;
+        margin-bottom: 15px;
+        border-left: 4px solid var(--av-primary);
+    }
+
+    .age-summary-title {
+        margin-bottom: 4px;
+        color: var(--av-text);
+    }
+
+    .age-filter-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+    }
+
+    .age-chip {
+        display: inline-block;
+        padding: 4px 12px;
+        background-color: var(--av-primary);
+        color: white;
+        border-radius: 16px;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: bold;
+        transition: background-color 0.2s;
+    }
+
+    .age-chip:hover {
+        background-color: #005ba1;
+    }
+
+    .age-chip.possible {
+        background-color: var(--av-text-muted);
+    }
+
+    .age-chip.possible:hover {
+        background-color: #6b6c6e;
+    }
+
+    .age-chip.active {
+        background-color: #ff4500;
+    }
+
+    .age-chip.active:hover {
+        background-color: #cc3700;
+    }
+
+    .age-chip.posted.active {
+        background-color: #2d8a44;
+    }
+
+    .age-chip.posted.active:hover {
+        background-color: #237035;
+    }
+
+    .age-chip.possible.active {
+        background-color: var(--av-warning);
+    }
+
+    .age-chip.possible.active:hover {
+        background-color: #e67a32;
+    }
+
+    .age-filter-status-container {
+        margin-top: 10px;
+    }
+
+    .age-filter-status {
+        background-color: var(--av-warning);
+        color: white;
+        padding: 8px 12px;
+        border-radius: 4px;
+        margin-bottom: 10px;
+        cursor: pointer;
+        font-size: 13px;
+    }
+
+    .age-filter-status:hover {
+        background-color: #cc3700;
+    }
+
+    .age-results-container {
+        margin-bottom: 15px;
+    }
+
+    .age-result-item {
+        background-color: var(--av-surface);
+        padding: 12px;
+        margin-bottom: 10px;
+        border-radius: 4px;
+        border-left: 3px solid var(--av-primary);
+    }
+
+    .age-result-item.hidden {
+        display: none;
+    }
+
+    .age-result-header {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 8px;
+        font-size: 13px;
+    }
+
+    .age-result-age {
+        font-weight: bold;
+        color: #ff4500;
+        font-size: 14px;
+    }
+
+    .age-result-date {
+        color: var(--av-text-muted);
+    }
+
+    .age-result-subreddit {
+        color: var(--av-primary);
+        font-weight: normal;
+    }
+
+    .age-result-snippet {
+        color: var(--av-text);
+        font-size: 12px;
+        margin: 8px 0;
+        line-height: 1.4;
+    }
+
+    .age-result-link {
+        color: var(--av-primary);
+        text-decoration: none;
+        font-size: 11px;
+    }
+
+    .age-result-link:hover {
+        text-decoration: underline;
+    }
+
+    .age-error {
+        background-color: #4a1c1c;
+        color: #ff6b6b;
+        padding: 12px;
+        border-radius: 4px;
+        border-left: 4px solid var(--av-danger);
+    }
+
+    .age-loading {
+        text-align: center;
+        padding: 20px;
+        color: var(--av-text-muted);
+    }
+
+    .age-loading::after {
+        content: '...';
+        animation: dots 1.5s steps(4, end) infinite;
+    }
+
+    @keyframes dots {
+        0%, 20% { content: '.'; }
+        40% { content: '..'; }
+        60%, 100% { content: '...'; }
+    }
+
+    .age-modal-buttons {
+        display: flex;
+        justify-content: flex-start;
+        gap: 10px;
+        padding: 15px 20px;
+        border-top: 1px solid var(--av-border);
+        flex-shrink: 0;
+    }
+
+    .age-link-text {
+        color: var(--av-primary);
+        margin: 10px 0;
+    }
+
+    .age-link-text a {
+        color: var(--av-primary);
+        text-decoration: underline;
+    }
+
+    .age-link-text a:hover {
+        color: #005ba1;
+    }
+
+    /* Resizable modal */
+    .age-modal.resizable {
+        resize: both;
+        overflow: hidden;
+    }
+
+    .highlight-age {
+        background-color: #ff4500;
+        color: white;
+        padding: 2px 4px;
+        border-radius: 2px;
+        font-weight: bold;
+    }
+
+    .highlight-age.posted {
+        background-color: var(--av-success);
+        color: white;
+    }
+
+    .highlight-age.possible {
+        background-color: var(--av-warning);
+        color: white;
+    }
+
+    .expand-link,
+    .collapse-link {
+        color: var(--av-primary);
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: bold;
+        text-decoration: none;
+        user-select: none;
+    }
+
+    .expand-link:hover,
+    .collapse-link:hover {
+        color: #005ba1;
+        text-decoration: underline;
+    }
+
+    .snippet-content {
+        word-wrap: break-word;
+    }
+
+    /* Settings Modal Specific Styles */
+    .age-settings-section {
+        margin-bottom: 25px;
+        padding-bottom: 20px;
+        border-bottom: 1px solid var(--av-border);
+    }
+
+    .age-settings-section:last-child {
+        border-bottom: none;
+        margin-bottom: 0;
+    }
+
+    .age-settings-section-title {
+        font-size: 16px;
+        font-weight: bold;
+        color: var(--av-text);
+        margin-bottom: 15px;
+    }
+
+    .age-settings-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+        gap: 15px;
+    }
+
+    .age-settings-label {
+        color: var(--av-text);
+        font-size: 13px;
+        flex: 1;
+    }
+
+    .age-settings-input {
+        background-color: var(--av-surface);
+        border: 1px solid var(--av-border);
+        border-radius: 4px;
+        color: var(--av-text);
+        padding: 6px 10px;
+        font-size: 13px;
+        width: 80px;
+    }
+
+    .age-settings-input:focus {
+        outline: none;
+        border-color: var(--av-primary);
+    }
+
+    .age-settings-checkbox {
+        width: 18px;
+        height: 18px;
+        cursor: pointer;
+    }
+
+    .age-settings-textarea {
+        width: 100%;
+        min-height: 100px;
+        background-color: var(--av-surface);
+        border: 1px solid var(--av-border);
+        border-radius: 4px;
+        color: var(--av-text);
+        padding: 8px;
+        font-size: 12px;
+        font-family: monospace;
+        resize: vertical;
+    }
+
+    .age-settings-textarea:focus {
+        outline: none;
+        border-color: var(--av-primary);
+    }
+
+    .age-ignored-users-list {
+        max-height: 150px;
+        overflow-y: auto;
+        background-color: var(--av-surface);
+        border: 1px solid var(--av-border);
+        border-radius: 4px;
+        padding: 8px;
+        margin-top: 10px;
+    }
+
+    .age-ignored-user-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 4px 8px;
+        margin-bottom: 4px;
+        background-color: var(--av-background);
+        border-radius: 3px;
+    }
+
+    .age-ignored-user-name {
+        color: var(--av-text);
+        font-size: 12px;
+        font-family: monospace;
+    }
+
+    .age-ignored-user-remove {
+        background-color: var(--av-danger);
+        color: white;
+        border: none;
+        border-radius: 3px;
+        padding: 2px 8px;
+        font-size: 11px;
+        cursor: pointer;
+        font-weight: bold;
+    }
+
+    .age-ignored-user-remove:hover {
+        background-color: #c20022;
+    }
+
+    .age-settings-bot-list {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        margin-top: 10px;
+    }
+
+    .age-settings-bot-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .age-settings-bot-label {
+        color: var(--av-text);
+        font-size: 12px;
+        font-family: monospace;
+    }
+
+    .age-settings-buttons-row {
+        display: flex;
+        gap: 10px;
+        margin-top: 15px;
+    }
+
+    .age-settings-gear {
+        background: none;
+        border: none;
+        color: var(--av-text-muted);
+        font-size: 20px;
+        cursor: pointer;
+        padding: 0;
+        width: 30px;
+        height: 30px;
+        line-height: 30px;
+        text-align: center;
+        margin-left: 10px;
+    }
+
+    .age-settings-gear:hover {
+        color: var(--av-text);
+    }
+
+    .age-settings-help-text {
+        color: var(--av-text-muted);
+        font-size: 11px;
+        margin-top: 5px;
+        font-style: italic;
+    }
+
+    /* Deep Analysis Modal Styles */
+    .deep-analysis-section {
+        background-color: var(--av-surface);
+        border: 1px solid var(--av-border);
+        border-radius: 6px;
+        margin-bottom: 15px;
+        overflow: hidden;
+    }
+
+    .deep-analysis-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 15px;
+        background-color: var(--av-analysis-header);
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .deep-analysis-header:hover {
+        background-color: var(--av-analysis-header-hover);
+    }
+
+    .deep-analysis-title {
+        font-weight: bold;
+        font-size: 14px;
+        color: var(--av-text);
+    }
+
+    .deep-analysis-toggle {
+        color: var(--av-text-muted);
+        font-size: 12px;
+    }
+
+    .deep-analysis-copy {
+        background: none;
+        border: none;
+        color: var(--av-text-muted);
+        font-size: 16px;
+        cursor: pointer;
+        padding: 0 8px;
+        transition: color 0.2s;
+    }
+
+    .deep-analysis-copy:hover {
+        color: var(--av-text);
+    }
+
+    .deep-analysis-copy.copied {
+        color: var(--av-success);
+    }
+
+    .deep-analysis-content {
+        padding: 15px;
+        border-top: 1px solid var(--av-border);
+    }
+
+    .deep-analysis-content.collapsed {
+        display: none;
+    }
+
+    .analysis-stat-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--av-border);
+    }
+
+    .analysis-stat-row:last-child {
+        border-bottom: none;
+    }
+
+    .analysis-stat-label {
+        color: var(--av-text-muted);
+        font-size: 13px;
+    }
+
+    .analysis-stat-value {
+        color: var(--av-text);
+        font-size: 13px;
+        font-weight: 500;
+    }
+
+    .analysis-stat-value.warning {
+        color: var(--av-warning);
+    }
+
+    .analysis-stat-value.danger {
+        color: #ff6b6b;
+    }
+
+    .analysis-stat-value.success {
+        color: var(--av-success);
+    }
+
+    .analysis-stat-value.info {
+        color: var(--av-primary);
+    }
+
+    .timeline-entry {
+        display: flex;
+        padding: 8px 12px;
+        border-left: 3px solid var(--av-border);
+        margin-bottom: 8px;
+        background-color: var(--av-analysis-header);
+        border-radius: 0 4px 4px 0;
+    }
+
+    .timeline-entry.age-increase {
+        border-left-color: var(--av-success);
+    }
+
+    .timeline-entry.age-decrease {
+        border-left-color: #ff6b6b;
+    }
+
+    .timeline-entry.age-same {
+        border-left-color: var(--av-text-muted);
+    }
+
+    .timeline-entry.first-post {
+        border-left-color: var(--av-primary);
+    }
+
+    .timeline-date {
+        color: var(--av-text-muted);
+        font-size: 11px;
+        min-width: 140px;
+    }
+
+    .timeline-age {
+        font-weight: bold;
+        min-width: 60px;
+    }
+
+    .timeline-subreddit {
+        color: var(--av-primary);
+        font-size: 12px;
+        min-width: 150px;
+    }
+
+    .timeline-change {
+        color: var(--av-text-muted);
+        font-size: 12px;
+        flex: 1;
+    }
+
+    .subreddit-comparison-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+    }
+
+    .subreddit-comparison-table th {
+        text-align: left;
+        padding: 8px;
+        background-color: var(--av-surface);
+        color: var(--av-text-muted);
+        font-weight: normal;
+        border-bottom: 1px solid var(--av-border);
+    }
+
+    .subreddit-comparison-table td {
+        padding: 8px;
+        border-bottom: 1px solid var(--av-border);
+        color: var(--av-text);
+    }
+
+    .subreddit-comparison-table tr:last-child td {
+        border-bottom: none;
+    }
+
+    .couples-track {
+        background-color: var(--av-surface);
+        border: 1px solid var(--av-border);
+        border-radius: 4px;
+        padding: 12px;
+        margin-bottom: 10px;
+    }
+
+    .couples-track-title {
+        font-weight: bold;
+        margin-bottom: 8px;
+        color: var(--av-text);
+    }
+
+    .birthday-estimate {
+        background-color: var(--av-analysis-header);
+        border-radius: 4px;
+        padding: 15px;
+        text-align: center;
+    }
+
+    .birthday-month-range {
+        font-size: 18px;
+        font-weight: bold;
+        color: var(--av-primary);
+        margin-bottom: 5px;
+    }
+
+    .birthday-confidence {
+        font-size: 12px;
+        color: var(--av-text-muted);
+    }
+
+    .fetch-more-container {
+        text-align: center;
+        padding: 15px;
+        border-top: 1px solid var(--av-border);
+        margin-top: 15px;
+    }
+
+    .fetch-more-status {
+        color: var(--av-text-muted);
+        font-size: 12px;
+        margin-top: 8px;
+    }
+
+    .anomaly-item {
+        background-color: var(--av-anomaly-bg);
+        border-left: 3px solid #ff6b6b;
+        padding: 10px 12px;
+        margin-bottom: 8px;
+        border-radius: 0 4px 4px 0;
+    }
+
+    .anomaly-description {
+        color: #ff6b6b;
+        font-size: 13px;
+    }
+
+    .anomaly-date {
+        color: var(--av-text-muted);
+        font-size: 11px;
+        margin-top: 4px;
+    }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.8; }
+    }
+
+    .custom-button-editor {
+        cursor: move;
+        transition: opacity 0.2s, transform 0.2s;
+    }
+
+    .custom-button-editor.dragging {
+        opacity: 0.5;
+        transform: scale(0.98);
+    }
+
+    .custom-button-editor.drag-over {
+        border-top: 3px solid var(--av-primary);
+    }
+
+    .custom-button-drag-handle {
+        color: var(--av-text-muted);
+        font-size: 18px;
+        cursor: grab;
+        user-select: none;
+        margin-right: 8px;
+    }
+
+    .custom-button-drag-handle:active {
+        cursor: grabbing;
+    }
+
+    /* Floating Notification Banner */
+    .settings-notification-banner {
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background-color: var(--av-success);
+        color: white;
+        padding: 15px 25px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        z-index: 999999;
+        font-size: 14px;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        animation: slideUpFadeIn 0.3s ease-out;
+        opacity: 0;
+    }
+
+    .settings-notification-banner.show {
+        opacity: 1;
+    }
+
+    .settings-notification-banner.hide {
+        animation: slideDownFadeOut 0.3s ease-out forwards;
+    }
+
+    @keyframes slideUpFadeIn {
+        from {
+            transform: translateX(-50%) translateY(20px);
+            opacity: 0;
+        }
+        to {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
+    }
+
+    @keyframes slideDownFadeOut {
+        from {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
+        to {
+            transform: translateX(-50%) translateY(20px);
+            opacity: 0;
+        }
+    }
+
+    /* Manual Search Styles */
+    .manual-search-form {
+        display: grid;
+        gap: 15px;
+    }
+
+    .manual-search-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 12px;
+    }
+
+    .manual-search-field {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+    }
+
+    .manual-search-label {
+        color: var(--av-text);
+        font-size: 11px;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .manual-search-input {
+        background-color: var(--av-surface);
+        border: 1px solid var(--av-border);
+        border-radius: 4px;
+        color: var(--av-text);
+        padding: 8px 10px;
+        font-size: 13px;
+    }
+
+    .manual-search-input:focus {
+        outline: none;
+        border-color: var(--av-primary);
+    }
+
+    .manual-search-select {
+        background-color: var(--av-surface);
+        border: 1px solid var(--av-border);
+        border-radius: 4px;
+        color: var(--av-text);
+        padding: 8px 10px;
+        font-size: 13px;
+        cursor: pointer;
+    }
+
+    .manual-search-checkbox-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 15px;
+        padding: 10px;
+        background-color: --av-analysis-header;
+        border-radius: 4px;
+    }
+
+    .manual-search-checkbox-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .manual-search-checkbox-item label {
+        color: var(--av-text);
+        font-size: 13px;
+        cursor: pointer;
+    }
+
+    .manual-result-item {
+        background-color: var(--av-surface);
+        padding: 15px;
+        margin-bottom: 12px;
+        border-radius: 4px;
+        border-left: 3px solid var(--av-primary);
+    }
+
+    .manual-result-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 10px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--av-border);
+    }
+
+    .manual-result-meta {
+        display: flex;
+        gap: 15px;
+        font-size: 12px;
+        color: var(--av-text-muted);
+        flex-wrap: wrap;
+    }
+
+    .manual-result-author {
+        color: var(--av-primary);
+        font-weight: bold;
+        text-decoration: none;
+    }
+
+    .manual-result-author:hover {
+        text-decoration: underline;
+    }
+
+    .manual-result-score {
+        color: var(--av-warning);
+    }
+
+    .manual-result-title {
+        font-size: 15px;
+        font-weight: bold;
+        color: var(--av-text);
+        margin-bottom: 10px;
+    }
+
+    .manual-result-body {
+        color: var(--av-text);
+        font-size: 13px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+    }
+
+    .highlight-search-term {
+        background-color: #ff4500;
+        color: white;
+        padding: 2px 4px;
+        border-radius: 2px;
+        font-weight: bold;
+    }
 
 `);
 
@@ -1279,6 +1316,43 @@ function logDebug(...args) {
     if (debugMode) {
         console.log('[Age Verifier]', ...args);
     }
+}
+
+// Function to show floating notification banner
+function showNotificationBanner(message, duration = 3000) {
+    // Remove any existing banner
+    const existingBanner = document.querySelector('.settings-notification-banner');
+    if (existingBanner) {
+        existingBanner.remove();
+    }
+
+    // Create new banner
+    const banner = document.createElement('div');
+    banner.className = 'settings-notification-banner';
+    banner.innerHTML = `
+        <span style="font-size: 18px;">✓</span>
+        <span>${message}</span>
+    `;
+
+    document.body.appendChild(banner);
+
+    // Trigger show animation
+    requestAnimationFrame(() => {
+        banner.classList.add('show');
+    });
+
+    // Auto-hide after duration
+    setTimeout(() => {
+        banner.classList.add('hide');
+        banner.classList.remove('show');
+
+        // Remove from DOM after animation completes
+        setTimeout(() => {
+            if (banner.parentNode) {
+                banner.remove();
+            }
+        }, 300);
+    }, duration);
 }
 
 // ============================================================================
@@ -1618,9 +1692,6 @@ function showTokenModal(pendingUsername = null) {
         GM_setValue('pendingAgeCheck', pendingUsername);
     }
 
-    const wrapper = document.createElement('div');
-    wrapper.className = 'av-ui-root';
-
     const overlay = document.createElement('div');
     overlay.className = 'age-modal-overlay';
 
@@ -1655,8 +1726,8 @@ function showTokenModal(pendingUsername = null) {
         </div>
     `;
 
-    wrapper.appendChild(modal);
-    document.body.appendChild(wrapper);
+    document.body.appendChild(overlay);
+    document.body.appendChild(modal);
 
     tokenModal = { modal, overlay };
 
@@ -1685,7 +1756,8 @@ function showTokenModal(pendingUsername = null) {
     modalContent.appendChild(autoFetchBtn);
 
     const closeModal = () => {
-        document.body.removeChild(wrapper);
+        document.body.removeChild(overlay);
+        document.body.removeChild(modal);
         tokenModal = null;
     };
 
@@ -1755,12 +1827,8 @@ function showTokenModal(pendingUsername = null) {
 function showSettingsModal() {
     const modalId = `age-modal-${modalCounter++}`;
 
-    const wrapper = document.createElement('div');
-    wrapper.className = 'av-ui-root';
-
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
-
     modal.dataset.modalId = modalId;
     modal.style.minWidth = '500px';
     modal.style.width = '500px';
@@ -2075,7 +2143,7 @@ function showSettingsModal() {
 
                 <div id="custom-buttons-list">
                     ${userSettings.customButtons.map((btn, idx) => `
-                        <div class="custom-button-editor" data-index="${idx}" draggable="true" style="background-color: #1f1f21; padding: 12px; border-radius: 4px; margin-bottom: 10px;">
+                        <div class="custom-button-editor" data-index="${idx}" draggable="true" style="background-color: var(--av-surface); padding: 12px; border-radius: 4px; margin-bottom: 10px;">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                                 <span class="custom-button-drag-handle" title="Drag to reorder">⋮⋮</span>
                                 <button class="age-modal-button danger" style="margin: 0; padding: 4px 12px; font-size: 12px;"
@@ -2142,8 +2210,7 @@ function showSettingsModal() {
         </div>
     `;
 
-    wrapper.appendChild(modal);
-    document.body.appendChild(wrapper);
+    document.body.appendChild(modal);
 
     makeDraggable(modal);
     modal.addEventListener('mousedown', () => {
@@ -2164,7 +2231,7 @@ function showSettingsModal() {
     const addUsersBtn = modal.querySelector('#add-ignored-users');
 
     const closeModal = () => {
-        document.body.removeChild(wrapper);
+        document.body.removeChild(modal);
         resultsModals = resultsModals.filter(m => m.modalId !== modalId);
     };
 
@@ -2272,7 +2339,7 @@ function showSettingsModal() {
             });
         }
 
-        alert('Settings saved! Please refresh the page for all changes to take effect.');
+        showNotificationBanner('Settings saved! Please refresh the page for all changes to take effect.', 4000);
         closeModal();
     };
 
@@ -2341,7 +2408,7 @@ function showSettingsModal() {
             const newIndex = modal.querySelectorAll('.custom-button-editor').length;
 
             const newButtonHTML = `
-                <div class="custom-button-editor" data-index="${newIndex}" draggable="true" style="background-color: #1f1f21; padding: 12px; border-radius: 4px; margin-bottom: 10px;">
+                <div class="custom-button-editor" data-index="${newIndex}" draggable="true" style="background-color: var(--av-surface); padding: 12px; border-radius: 4px; margin-bottom: 10px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                         <span class="custom-button-drag-handle" title="Drag to reorder">⋮⋮</span>
                         <button class="age-modal-button danger" style="margin: 0; padding: 4px 12px; font-size: 12px;"
@@ -4571,12 +4638,8 @@ function escapeRegExp(string) {
 function showManualSearchModal(prefillAuthor = null) {
     const modalId = `age-modal-${modalCounter++}`;
 
-    const wrapper = document.createElement('div');
-    wrapper.className = 'av-ui-root';
-
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
-
     modal.dataset.modalId = modalId;
     modal.style.width = '700px';
     modal.style.height = '600px';
@@ -4664,8 +4727,7 @@ function showManualSearchModal(prefillAuthor = null) {
         </div>
     `;
 
-    wrapper.appendChild(modal);
-    document.body.appendChild(wrapper);
+    document.body.appendChild(modal);
 
     makeDraggable(modal);
     modal.addEventListener('mousedown', () => {
@@ -4681,7 +4743,7 @@ function showManualSearchModal(prefillAuthor = null) {
     const form = modal.querySelector('#manual-search-form');
 
     const closeModal = () => {
-        document.body.removeChild(wrapper);
+        document.body.removeChild(modal);
         resultsModals = resultsModals.filter(m => m.modalId !== modalId);
     };
 
@@ -4741,12 +4803,8 @@ function showManualSearchResults(searchData) {
     const { results, params } = searchData;
     const modalId = `age-modal-${modalCounter++}`;
 
-    const wrapper = document.createElement('div');
-    wrapper.className = 'av-ui-root';
-
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
-
     modal.dataset.modalId = modalId;
     modal.style.width = `${userSettings.modalWidth}px`;
     modal.style.height = `${userSettings.modalHeight}px`;
@@ -4767,7 +4825,7 @@ function showManualSearchResults(searchData) {
             <p>Your search returned no results. Try adjusting your search criteria.</p>
         </div>`;
     } else {
-        resultsHTML = `<div style="color: var(--av-success); font-weight: bold; margin-bottom: 15px; padding: 10px; background-color: #1f1f21; border-radius: 4px;">
+        resultsHTML = `<div style="color: var(--av-success); font-weight: bold; margin-bottom: 15px; padding: 10px; background-color: var(--av-surface); border-radius: 4px;">
             Found ${results.length} ${results.length === 1 ? 'result' : 'results'}
         </div>`;
 
@@ -4924,8 +4982,7 @@ function showManualSearchResults(searchData) {
         </div>
     `;
 
-    wrapper.appendChild(modal);
-    document.body.appendChild(wrapper);
+    document.body.appendChild(modal);
 
     makeDraggable(modal);
     modal.addEventListener('mousedown', () => {
@@ -4941,7 +4998,7 @@ function showManualSearchResults(searchData) {
     const form = modal.querySelector('#manual-search-form-results');
 
     const closeModal = () => {
-        document.body.removeChild(wrapper);
+        document.body.removeChild(modal);
         resultsModals = resultsModals.filter(m => m.modalId !== modalId);
     };
 
@@ -5007,12 +5064,8 @@ function showResultsModal(username, ageData) {
     overlay.className = 'age-modal-overlay';
     overlay.dataset.modalId = modalId;
 
-    const wrapper = document.createElement('div');
-    wrapper.className = 'av-ui-root';
-
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
-
     modal.dataset.modalId = modalId;
     modal.style.minWidth = '600px';
     modal.style.width = `${userSettings.modalWidth}px`;
@@ -5235,8 +5288,7 @@ function showResultsModal(username, ageData) {
 
     // Don't append overlay - we don't want darkening with multiple modals
     // document.body.appendChild(overlay);
-    wrapper.appendChild(modal);
-    document.body.appendChild(wrapper);
+    document.body.appendChild(modal);
 
     // Make modal draggable
     makeDraggable(modal);
@@ -5282,7 +5334,10 @@ function showResultsModal(username, ageData) {
     let activeFilter = null;
 
     const closeModal = () => {
-        document.body.removeChild(wrapper);
+        // Don't try to remove overlay since we didn't append it
+        // document.body.removeChild(overlay);
+        document.body.removeChild(modal);
+        // Remove from tracking array
         resultsModals = resultsModals.filter(m => m.modalId !== modalId);
     };
 
@@ -5560,12 +5615,8 @@ function showErrorModal(username, error) {
     overlay.className = 'age-modal-overlay';
     overlay.dataset.modalId = modalId;
 
-    const wrapper = document.createElement('div');
-    wrapper.className = 'av-ui-root';
-
     const modal = document.createElement('div');
     modal.className = 'age-modal';
-
     modal.dataset.modalId = modalId;
     modal.style.zIndex = ++zIndexCounter;
 
@@ -5586,8 +5637,7 @@ function showErrorModal(username, error) {
 
     // Don't append overlay
     // document.body.appendChild(overlay);
-    wrapper.appendChild(modal);
-    document.body.appendChild(wrapper);
+    document.body.appendChild(modal);
 
     makeDraggable(modal);
     modal.addEventListener('mousedown', (e) => {
@@ -5783,12 +5833,8 @@ function showDeepAnalysisModal(username, ageData, analysis) {
 
     const modalId = `age-modal-${modalCounter++}`;
 
-    const wrapper = document.createElement('div');
-    wrapper.className = 'av-ui-root';
-
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
-
     modal.dataset.modalId = modalId;
     modal.style.minWidth = '700px';
     modal.style.width = '900px';
@@ -5841,8 +5887,7 @@ function showDeepAnalysisModal(username, ageData, analysis) {
         </div>
     `;
 
-    wrapper.appendChild(modal);
-    document.body.appendChild(wrapper);
+    document.body.appendChild(modal);
 
     makeDraggable(modal);
     modal.addEventListener('mousedown', () => {
@@ -5862,7 +5907,7 @@ function showDeepAnalysisModal(username, ageData, analysis) {
     const fetchMoreBtn = modal.querySelector('#fetch-more-data');
 
     const closeModal = () => {
-        document.body.removeChild(wrapper);
+        document.body.removeChild(modal);
         resultsModals = resultsModals.filter(m => m.modalId !== modalId);
     };
 
@@ -6566,7 +6611,7 @@ function buildCouplesSection(analysis) {
                 <p style="color: var(--av-warning); margin-bottom: 15px;">
                     ⚠️ This appears to be a shared/couples account with two people of different ages.
                 </p>
-                <div style="background-color: #1f1f21; padding: 10px; border-radius: 4px; margin-bottom: 15px;">
+                <div style="background-color: var(--av-surface); padding: 10px; border-radius: 4px; margin-bottom: 15px;">
                     <div class="analysis-stat-row">
                         <span class="analysis-stat-label">Detection Method</span>
                         <span class="analysis-stat-value info">${couples.detectionMethod || 'Multiple signals'}</span>
@@ -6696,7 +6741,7 @@ function renderCustomButtons(username, ageData) {
     }).join('');
 
     return `
-        <div class="age-custom-buttons-row" style="display: flex; gap: 10px; margin-bottom: 15px; padding: 12px; background-color: #1f1f21; border-radius: 6px;">
+        <div class="age-custom-buttons-row" style="display: flex; gap: 10px; margin-bottom: 15px; padding: 12px; background-color: --av-analysis-header; border-radius: 6px;">
             ${buttonsHTML}
         </div>
     `;
@@ -6719,12 +6764,8 @@ function showLoadingModal(username) {
     overlay.className = 'age-modal-overlay';
     overlay.dataset.modalId = modalId;
 
-    const wrapper = document.createElement('div');
-    wrapper.className = 'av-ui-root';
-
     const modal = document.createElement('div');
     modal.className = 'age-modal';
-
     modal.dataset.modalId = modalId;
     modal.style.zIndex = ++zIndexCounter;
 
@@ -6739,8 +6780,7 @@ function showLoadingModal(username) {
 
     // Don't append overlay
     // document.body.appendChild(overlay);
-    wrapper.appendChild(modal);
-    document.body.appendChild(wrapper);
+    document.body.appendChild(modal);
 
     makeDraggable(modal);
     modal.addEventListener('mousedown', (e) => {
@@ -6821,9 +6861,6 @@ function createAgeCheckButton(username) {
         return null; // Don't create button for ignored users
     }
 
-    const wrapper = document.createElement('span');
-    wrapper.className = 'av-ui-root';
-
     const button = document.createElement('button');
     button.className = 'age-check-button';
     button.dataset.username = username;
@@ -6839,8 +6876,7 @@ function createAgeCheckButton(username) {
 
     button.onclick = () => handleAgeCheck(username);
 
-    wrapper.appendChild(button);
-    return wrapper;
+    return button;
 }
 
 function updateButtonForUser(username) {
