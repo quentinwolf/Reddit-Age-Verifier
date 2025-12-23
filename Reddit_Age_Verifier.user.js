@@ -1977,6 +1977,13 @@ function showSettingsModal() {
                 </div>
 
                 <div class="age-settings-row">
+                    <label class="age-settings-label">Default Button Text</label>
+                    <input type="text" class="age-settings-input" id="setting-button-text"
+                           value="${escapeHtml(userSettings.defaultButtonText)}"
+                           style="width: 150px;" placeholder="PushShift">
+                </div>
+
+                <div class="age-settings-row">
                     <label class="age-settings-label">Button Color (Default)</label>
                     <input type="color" class="age-settings-input" id="setting-button-default-color"
                            value="${userSettings.buttonDefaultColor}" style="width: 80px; height: 40px;">
@@ -2011,13 +2018,6 @@ function showSettingsModal() {
                     <label class="age-settings-label">Enable Debug Mode</label>
                     <input type="checkbox" class="age-settings-checkbox" id="setting-debug"
                            ${userSettings.debugMode ? 'checked' : ''}>
-                </div>
-
-                <div class="age-settings-row">
-                    <label class="age-settings-label">Default Button Text</label>
-                    <input type="text" class="age-settings-input" id="setting-button-text"
-                           value="${escapeHtml(userSettings.defaultButtonText)}"
-                           style="width: 150px;" placeholder="PushShift">
                 </div>
 
                 <div class="age-settings-row">
