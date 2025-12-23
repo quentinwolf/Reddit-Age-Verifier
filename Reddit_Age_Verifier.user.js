@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.47
+// @version      1.48
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -84,7 +84,8 @@ const DEFAULT_SETTINGS = {
         danger: '#ea0027',
         analysisHeader: '#1f1f21',
         analysisHeaderHover: '#2a2a2c',
-        anomalyBg: '#4a1c1c'
+        anomalyBg: '#4a1c1c',
+        link: '#5ca3f5'
     },
     enableVeryLowConfidence: ENABLE_VERY_LOW_CONFIDENCE,
     titleSnippetLength: TITLE_SNIPPET_LENGTH,
@@ -127,7 +128,8 @@ const THEME_PRESETS = {
         danger: '#ea0027',
         analysisHeader: '#1f1f21',
         analysisHeaderHover: '#2a2a2c',
-        anomalyBg: '#4a1c1c'
+        anomalyBg: '#4a1c1c',
+        link: '#5ca3f5'
     },
     light: {
         primary: '#0079d3',
@@ -141,7 +143,8 @@ const THEME_PRESETS = {
         danger: '#ea0027',
         analysisHeader: '#e8e9ea',
         analysisHeaderHover: '#d8d9da',
-        anomalyBg: '#ffe5e5'
+        anomalyBg: '#ffe5e5',
+        link: '#0051a3'
     },
     'high-contrast': {
         primary: '#0099ff',
@@ -155,7 +158,8 @@ const THEME_PRESETS = {
         danger: '#ff0000',
         analysisHeader: '#0a0a0a',
         analysisHeaderHover: '#1f1f1f',
-        anomalyBg: '#330000'
+        anomalyBg: '#330000',
+        link: '#66b3ff'
     }
 };
 
@@ -221,6 +225,7 @@ function applyTheme() {
     document.documentElement.style.setProperty('--av-analysis-header', colors.analysisHeader);
     document.documentElement.style.setProperty('--av-analysis-header-hover', colors.analysisHeaderHover);
     document.documentElement.style.setProperty('--av-anomaly-bg', colors.anomalyBg);
+    document.documentElement.style.setProperty('--av-link', colors.link);
     document.documentElement.style.setProperty('--av-button-default', userSettings.buttonDefaultColor);
     document.documentElement.style.setProperty('--av-button-cached', userSettings.buttonCachedColor);
 }
@@ -407,6 +412,10 @@ GM_addStyle(`
         overflow-y: auto;
         flex: 1;
         min-height: 0;
+    }
+
+    .age-modal-content a {
+        color: var(--av-link);
     }
 
     .age-modal-topbar {
@@ -6680,7 +6689,7 @@ function buildTimelineSection(analysis) {
                 <span class="timeline-age" style="color: ${entryClass === 'age-decrease' ? '#ff6b6b' : 'var(--av-text)'};">
                     Age: <a href="${point.permalink}" target="_blank" style="color: inherit; text-decoration: underline;">${point.age}</a>
                 </span>
-                <span class="timeline-subreddit" style="margin-left: 8px;"><a href="https://old.reddit.com/r/${point.subreddit}" target="_blank">r/${point.subreddit}</a></span>
+                <span class="timeline-subreddit" style="margin-left: 8px;"><a href="https://old.reddit.com/r/${point.subreddit}" target="_blank" style="color: var(--av-link);">r/${point.subreddit}</a></span>
                 <span class="timeline-change">${changeText}</span>
             </div>
         `);
