@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.46
+// @version      1.47
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -1977,13 +1977,6 @@ function showSettingsModal() {
                 </div>
 
                 <div class="age-settings-row">
-                    <label class="age-settings-label">Default Button Text</label>
-                    <input type="text" class="age-settings-input" id="setting-button-text"
-                           value="${escapeHtml(userSettings.defaultButtonText)}"
-                           style="width: 150px;" placeholder="PushShift">
-                </div>
-
-                <div class="age-settings-row">
                     <label class="age-settings-label">Button Color (Default)</label>
                     <input type="color" class="age-settings-input" id="setting-button-default-color"
                            value="${userSettings.buttonDefaultColor}" style="width: 80px; height: 40px;">
@@ -2018,6 +2011,13 @@ function showSettingsModal() {
                     <label class="age-settings-label">Enable Debug Mode</label>
                     <input type="checkbox" class="age-settings-checkbox" id="setting-debug"
                            ${userSettings.debugMode ? 'checked' : ''}>
+                </div>
+
+                <div class="age-settings-row">
+                    <label class="age-settings-label">Default Button Text</label>
+                    <input type="text" class="age-settings-input" id="setting-button-text"
+                           value="${escapeHtml(userSettings.defaultButtonText)}"
+                           style="width: 150px;" placeholder="PushShift">
                 </div>
 
                 <div class="age-settings-row">
@@ -5667,7 +5667,7 @@ function copyDeepAnalysisSectionAsMarkdown(sectionType, analysis, username) {
 
     switch (sectionType) {
         case 'overview':
-            markdown += `## Overview - u/${username}\n\n`;
+            markdown += `#### Overview - u/${username}\n\n`;
             markdown += `- **Posts with Age Mentions:** ${analysis.totalPosts}\n`;
             markdown += `- **Posted Ages:** ${analysis.postedAges.length > 0 ? analysis.postedAges.join(', ') : 'None'}\n`;
             markdown += `- **Possible Ages:** ${analysis.possibleAges.length > 0 ? analysis.possibleAges.join(', ') : 'None'}\n`;
@@ -5686,7 +5686,7 @@ function copyDeepAnalysisSectionAsMarkdown(sectionType, analysis, username) {
             break;
 
         case 'anomalies':
-            markdown += `## Anomalies & Age Inconsistencies - u/${username}\n\n`;
+            markdown += `#### Anomalies & Age Inconsistencies - u/${username}\n\n`;
             if (analysis.backwardsAging.length === 0 && (!analysis.staleAges || analysis.staleAges.length === 0)) {
                 markdown += '✓ No age anomalies detected.\n';
             } else {
@@ -5711,7 +5711,7 @@ function copyDeepAnalysisSectionAsMarkdown(sectionType, analysis, username) {
             break;
 
         case 'subreddit':
-            markdown += `## Subreddit Age Comparison - u/${username}\n\n`;
+            markdown += `#### Subreddit Age Comparison - u/${username}\n\n`;
             const comparison = analysis.subredditComparison;
             const trackedSubs = userSettings.trackedSubreddits || [];
 
@@ -5741,7 +5741,7 @@ function copyDeepAnalysisSectionAsMarkdown(sectionType, analysis, username) {
             break;
 
         case 'birthday':
-            markdown += `## Birthday Estimate - u/${username}\n\n`;
+            markdown += `#### Birthday Estimate - u/${username}\n\n`;
             const birthday = analysis.birthdayEstimate;
             if (!birthday || birthday.confidence === 'None') {
                 markdown += birthday && birthday.reason ? birthday.reason : 'Unable to estimate birthday from available data.\n';
@@ -5758,7 +5758,7 @@ function copyDeepAnalysisSectionAsMarkdown(sectionType, analysis, username) {
             break;
 
         case 'couples':
-            markdown += `## Couples Account Detection - u/${username}\n\n`;
+            markdown += `#### Couples Account Detection - u/${username}\n\n`;
             const couples = analysis.couplesAnalysis;
             if (!couples || !couples.isCouplesAccount) {
                 markdown += '✓ No couples/shared account pattern detected.\n';
@@ -5787,7 +5787,7 @@ function copyDeepAnalysisSectionAsMarkdown(sectionType, analysis, username) {
             break;
 
         case 'timeline':
-            markdown += `## Age Timeline - u/${username}\n\n`;
+            markdown += `#### Age Timeline - u/${username}\n\n`;
             if (analysis.timeline.length === 0) {
                 markdown += 'No timeline data available.\n';
             } else {
@@ -6678,9 +6678,9 @@ function buildTimelineSection(analysis) {
                     year: 'numeric', month: 'short', day: 'numeric'
                 })}</span>
                 <span class="timeline-age" style="color: ${entryClass === 'age-decrease' ? '#ff6b6b' : 'var(--av-text)'};">
-                    Age: ${point.age}
+                    Age: <a href="${point.permalink}" target="_blank" style="color: inherit; text-decoration: underline;">${point.age}</a>
                 </span>
-                <span class="timeline-subreddit"><a href="https://old.reddit.com/r/${point.subreddit}" target="_blank">r/${point.subreddit}</a></span>
+                <span class="timeline-subreddit" style="margin-left: 8px;"><a href="https://old.reddit.com/r/${point.subreddit}" target="_blank">r/${point.subreddit}</a></span>
                 <span class="timeline-change">${changeText}</span>
             </div>
         `);
