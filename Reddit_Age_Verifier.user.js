@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.43
+// @version      1.44
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -69,6 +69,20 @@ const DEFAULT_SETTINGS = {
     minAge: MIN_AGE,
     maxAge: MAX_AGE,
     defaultButtonText: 'PushShift',
+    buttonDefaultColor: '#0079d3',
+    buttonCachedColor: '#46d160',
+    themePreset: 'default', // 'default', 'light', 'high-contrast', 'custom'
+    customColors: {
+        primary: '#0079d3',
+        background: '#1a1a1b',
+        surface: '#272729',
+        text: '#d7dadc',
+        textMuted: '#818384',
+        border: '#343536',
+        success: '#46d160',
+        warning: '#ff8c42',
+        danger: '#ea0027'
+    },
     enableVeryLowConfidence: ENABLE_VERY_LOW_CONFIDENCE,
     titleSnippetLength: TITLE_SNIPPET_LENGTH,
     bodySnippetLength: BODY_SNIPPET_LENGTH,
@@ -95,6 +109,42 @@ const DEFAULT_SETTINGS = {
     customButtons: [
         // Example: { id: 'clickme', label: 'Clickable Button', urlTemplate: 'https://someurl.here', enabled: true, style: 'danger' }
     ]
+};
+
+const THEME_PRESETS = {
+    default: {
+        primary: '#0079d3',
+        background: '#1a1a1b',
+        surface: '#272729',
+        text: '#d7dadc',
+        textMuted: '#818384',
+        border: '#343536',
+        success: '#46d160',
+        warning: '#ff8c42',
+        danger: '#ea0027'
+    },
+    light: {
+        primary: '#0079d3',
+        background: '#ffffff',
+        surface: '#f6f7f8',
+        text: '#1c1c1c',
+        textMuted: '#7c7c7c',
+        border: '#ccc',
+        success: '#46d160',
+        warning: '#ff8c42',
+        danger: '#ea0027'
+    },
+    'high-contrast': {
+        primary: '#0099ff',
+        background: '#000000',
+        surface: '#1a1a1a',
+        text: '#ffffff',
+        textMuted: '#cccccc',
+        border: '#ffffff',
+        success: '#00ff00',
+        warning: '#ffaa00',
+        danger: '#ff0000'
+    }
 };
 
 let userSettings = null;
@@ -136,6 +186,28 @@ function applySettings() {
     TITLE_SNIPPET_LENGTH = userSettings.titleSnippetLength;
     BODY_SNIPPET_LENGTH = userSettings.bodySnippetLength;
     CACHE_EXPIRATION = userSettings.cacheExpiration * 24 * 60 * 60 * 1000; // convert days to ms
+
+    // Apply theme
+    applyTheme();
+}
+
+function applyTheme() {
+    const colors = userSettings.themePreset === 'custom'
+        ? userSettings.customColors
+        : THEME_PRESETS[userSettings.themePreset] || THEME_PRESETS.default;
+
+    // Set CSS variables
+    document.documentElement.style.setProperty('--av-primary', colors.primary);
+    document.documentElement.style.setProperty('--av-background', colors.background);
+    document.documentElement.style.setProperty('--av-surface', colors.surface);
+    document.documentElement.style.setProperty('--av-text', colors.text);
+    document.documentElement.style.setProperty('--av-text-muted', colors.textMuted);
+    document.documentElement.style.setProperty('--av-border', colors.border);
+    document.documentElement.style.setProperty('--av-success', colors.success);
+    document.documentElement.style.setProperty('--av-warning', colors.warning);
+    document.documentElement.style.setProperty('--av-danger', colors.danger);
+    document.documentElement.style.setProperty('--av-button-default', userSettings.buttonDefaultColor);
+    document.documentElement.style.setProperty('--av-button-cached', userSettings.buttonCachedColor);
 }
 
 function getIgnoredUsersList() {
@@ -218,958 +290,982 @@ const OAUTH_FLOW_TIMEOUT = 60 * 1000; // 60 seconds
 // ============================================================================
 
 GM_addStyle(`
-    .age-check-button {
-        margin: 3px;
-        padding: 2px 6px;
-        background-color: #0079d3;
-        color: white;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 11px;
-        font-weight: bold;
-    }
-
-    .age-check-button:hover {
-        background-color: #005ba1;
-    }
-
-    .age-check-button.cached {
-        background-color: #46d160;
-    }
-
-    .age-check-button.cached:hover {
-        background-color: #37a84e;
-    }
-
-    .age-modal {
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background-color: #1a1a1b;
-        color: #d7dadc;
-        border: 2px solid #343536;
-        border-radius: 8px;
-        padding: 0;
-        z-index: 10000;
-        min-width: 400px;
-        min-height: 300px;
-        max-width: 95vw;
-        max-height: 95vh;  /* <-- Increased to 95% */
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.5);
-        display: flex;
-        flex-direction: column;
-    }
-
-    .age-modal-overlay {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background-color: rgba(0, 0, 0, 0.3);
-        z-index: 9999;
-        pointer-events: none;  /* Allow clicking through to background */
-    }
-
-    .age-modal-header {
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-        padding: 15px 20px;
-        border-bottom: 1px solid #343536;
-        user-select: none;
-        flex-shrink: 0;
-    }
-
-    .age-modal-title-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        width: 100%;
-        gap: 12px;
-        cursor: move;  /* Drag handle */
-    }
-
-    .age-modal-title {
-        font-size: 18px;
-        font-weight: bold;
-        color: #d7dadc;
-    }
-
-    .age-modal-close {
-        background: none;
-        border: none;
-        color: #818384;
-        font-size: 24px;
-        cursor: pointer;
-        padding: 0;
-        width: 30px;
-        height: 30px;
-        line-height: 30px;
-        text-align: center;
-    }
-
-    .age-modal-close:hover {
-        color: #d7dadc;
-    }
-
-    .age-modal-content {
-        padding: 20px;
-        overflow-y: auto;
-        flex: 1;
-        min-height: 0;
-    }
-
-    .age-modal-topbar {
-        width: 100%;
-        background-color: #1f1f21;
-        border: 1px solid #343536;
-        border-radius: 6px;
-        padding: 12px 14px;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
-    }
-
-    .age-token-input {
-        width: 100%;
-        padding: 8px;
-        background-color: #272729;
-        border: 1px solid #343536;
-        border-radius: 4px;
-        color: #d7dadc;
-        font-family: monospace;
-        font-size: 12px;
-        margin-top: 10px;
-    }
-
-    .age-modal-button {
-        padding: 8px 16px;
-        background-color: #0079d3;
-        color: white;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        font-weight: bold;
-        margin-right: 10px;
-    }
-
-    .age-modal-button:hover {
-        background-color: #005ba1;
-    }
-
-    .age-modal-button.secondary {
-        background-color: #343536;
-    }
-
-    .age-modal-button.secondary:hover {
-        background-color: #4a4a4b;
-    }
-
-    .age-modal-button.danger {
-        background-color: #ea0027;
-    }
-
-    .age-modal-button.danger:hover {
-        background-color: #c20022;
-    }
-
-    .age-summary {
-        background-color: #272729;
-        padding: 15px;
-        border-radius: 4px;
-        margin-bottom: 15px;
-        border-left: 4px solid #0079d3;
-    }
-
-    .age-summary-title {
-        margin-bottom: 4px;
-        color: #d7dadc;
-    }
-
-    .age-filter-chips {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        margin-top: 10px;
-    }
-
-    .age-chip {
-        display: inline-block;
-        padding: 4px 12px;
-        background-color: #0079d3;
-        color: white;
-        border-radius: 16px;
-        cursor: pointer;
-        font-size: 13px;
-        font-weight: bold;
-        transition: background-color 0.2s;
-    }
-
-    .age-chip:hover {
-        background-color: #005ba1;
-    }
-
-    .age-chip.possible {
-        background-color: #818384;
-    }
-
-    .age-chip.possible:hover {
-        background-color: #6b6c6e;
-    }
-
-    .age-chip.active {
-        background-color: #ff4500;
-    }
-
-    .age-chip.active:hover {
-        background-color: #cc3700;
-    }
-
-    .age-chip.posted.active {
-        background-color: #2d8a44;
-    }
-
-    .age-chip.posted.active:hover {
-        background-color: #237035;
-    }
-
-    .age-chip.possible.active {
-        background-color: #ff8c42;
-    }
-
-    .age-chip.possible.active:hover {
-        background-color: #e67a32;
-    }
-
-    .age-filter-status-container {
-        margin-top: 10px;
-    }
-
-    .age-filter-status {
-        background-color: #ff4500;
-        color: white;
-        padding: 8px 12px;
-        border-radius: 4px;
-        margin-bottom: 10px;
-        cursor: pointer;
-        font-size: 13px;
-    }
-
-    .age-filter-status:hover {
-        background-color: #cc3700;
-    }
-
-    .age-results-container {
-        margin-bottom: 15px;
-    }
-
-    .age-result-item {
-        background-color: #272729;
-        padding: 12px;
-        margin-bottom: 10px;
-        border-radius: 4px;
-        border-left: 3px solid #0079d3;
-    }
-
-    .age-result-item.hidden {
-        display: none;
-    }
-
-    .age-result-header {
-        display: flex;
-        justify-content: space-between;
-        margin-bottom: 8px;
-        font-size: 13px;
-    }
-
-    .age-result-age {
-        font-weight: bold;
-        color: #ff4500;
-        font-size: 14px;
-    }
-
-    .age-result-date {
-        color: #818384;
-    }
-
-    .age-result-subreddit {
-        color: #0079d3;
-        font-weight: normal;
-    }
-
-    .age-result-snippet {
-        color: #d7dadc;
-        font-size: 12px;
-        margin: 8px 0;
-        line-height: 1.4;
-    }
-
-    .age-result-link {
-        color: #0079d3;
-        text-decoration: none;
-        font-size: 11px;
-    }
-
-    .age-result-link:hover {
-        text-decoration: underline;
-    }
-
-    .age-error {
-        background-color: #4a1c1c;
-        color: #ff6b6b;
-        padding: 12px;
-        border-radius: 4px;
-        border-left: 4px solid #ea0027;
-    }
-
-    .age-loading {
-        text-align: center;
-        padding: 20px;
-        color: #818384;
-    }
-
-    .age-loading::after {
-        content: '...';
-        animation: dots 1.5s steps(4, end) infinite;
-    }
-
-    @keyframes dots {
-        0%, 20% { content: '.'; }
-        40% { content: '..'; }
-        60%, 100% { content: '...'; }
-    }
-
-    .age-modal-buttons {
-        display: flex;
-        justify-content: flex-start;
-        gap: 10px;
-        padding: 15px 20px;
-        border-top: 1px solid #343536;
-        flex-shrink: 0;
-    }
-
-    .age-link-text {
-        color: #0079d3;
-        margin: 10px 0;
-    }
-
-    .age-link-text a {
-        color: #0079d3;
-        text-decoration: underline;
-    }
-
-    .age-link-text a:hover {
-        color: #005ba1;
-    }
-
-    /* Resizable modal */
-    .age-modal.resizable {
-        resize: both;
-        overflow: hidden;
-    }
-
-    .highlight-age {
-        background-color: #ff4500;
-        color: white;
-        padding: 2px 4px;
-        border-radius: 2px;
-        font-weight: bold;
-    }
-
-    .highlight-age.posted {
-        background-color: #46d160;
-        color: white;
-    }
-
-    .highlight-age.possible {
-        background-color: #ff8c42;
-        color: white;
-    }
-
-    .expand-link,
-    .collapse-link {
-        color: #0079d3;
-        cursor: pointer;
-        font-size: 11px;
-        font-weight: bold;
-        text-decoration: none;
-        user-select: none;
-    }
-
-    .expand-link:hover,
-    .collapse-link:hover {
-        color: #005ba1;
-        text-decoration: underline;
-    }
-
-    .snippet-content {
-        word-wrap: break-word;
-    }
-
-    /* Settings Modal Specific Styles */
-    .age-settings-section {
-        margin-bottom: 25px;
-        padding-bottom: 20px;
-        border-bottom: 1px solid #343536;
-    }
-
-    .age-settings-section:last-child {
-        border-bottom: none;
-        margin-bottom: 0;
-    }
-
-    .age-settings-section-title {
-        font-size: 16px;
-        font-weight: bold;
-        color: #d7dadc;
-        margin-bottom: 15px;
-    }
-
-    .age-settings-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 12px;
-        gap: 15px;
-    }
-
-    .age-settings-label {
-        color: #d7dadc;
-        font-size: 13px;
-        flex: 1;
-    }
-
-    .age-settings-input {
-        background-color: #272729;
-        border: 1px solid #343536;
-        border-radius: 4px;
-        color: #d7dadc;
-        padding: 6px 10px;
-        font-size: 13px;
-        width: 80px;
-    }
-
-    .age-settings-input:focus {
-        outline: none;
-        border-color: #0079d3;
-    }
-
-    .age-settings-checkbox {
-        width: 18px;
-        height: 18px;
-        cursor: pointer;
-    }
-
-    .age-settings-textarea {
-        width: 100%;
-        min-height: 100px;
-        background-color: #272729;
-        border: 1px solid #343536;
-        border-radius: 4px;
-        color: #d7dadc;
-        padding: 8px;
-        font-size: 12px;
-        font-family: monospace;
-        resize: vertical;
-    }
-
-    .age-settings-textarea:focus {
-        outline: none;
-        border-color: #0079d3;
-    }
-
-    .age-ignored-users-list {
-        max-height: 150px;
-        overflow-y: auto;
-        background-color: #272729;
-        border: 1px solid #343536;
-        border-radius: 4px;
-        padding: 8px;
-        margin-top: 10px;
-    }
-
-    .age-ignored-user-item {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 4px 8px;
-        margin-bottom: 4px;
-        background-color: #1a1a1b;
-        border-radius: 3px;
-    }
-
-    .age-ignored-user-name {
-        color: #d7dadc;
-        font-size: 12px;
-        font-family: monospace;
-    }
-
-    .age-ignored-user-remove {
-        background-color: #ea0027;
-        color: white;
-        border: none;
-        border-radius: 3px;
-        padding: 2px 8px;
-        font-size: 11px;
-        cursor: pointer;
-        font-weight: bold;
-    }
-
-    .age-ignored-user-remove:hover {
-        background-color: #c20022;
-    }
-
-    .age-settings-bot-list {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 10px;
-        margin-top: 10px;
-    }
-
-    .age-settings-bot-item {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }
-
-    .age-settings-bot-label {
-        color: #d7dadc;
-        font-size: 12px;
-        font-family: monospace;
-    }
-
-    .age-settings-buttons-row {
-        display: flex;
-        gap: 10px;
-        margin-top: 15px;
-    }
-
-    .age-settings-gear {
-        background: none;
-        border: none;
-        color: #818384;
-        font-size: 20px;
-        cursor: pointer;
-        padding: 0;
-        width: 30px;
-        height: 30px;
-        line-height: 30px;
-        text-align: center;
-        margin-left: 10px;
-    }
-
-    .age-settings-gear:hover {
-        color: #d7dadc;
-    }
-
-    .age-settings-help-text {
-        color: #818384;
-        font-size: 11px;
-        margin-top: 5px;
-        font-style: italic;
-    }
-
-    /* Deep Analysis Modal Styles */
-    .deep-analysis-section {
-        background-color: #272729;
-        border: 1px solid #343536;
-        border-radius: 6px;
-        margin-bottom: 15px;
-        overflow: hidden;
-    }
-
-    .deep-analysis-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 12px 15px;
-        background-color: #1f1f21;
-        cursor: pointer;
-        user-select: none;
-    }
-
-    .deep-analysis-header:hover {
-        background-color: #2a2a2c;
-    }
-
-    .deep-analysis-title {
-        font-weight: bold;
-        font-size: 14px;
-        color: #d7dadc;
-    }
-
-    .deep-analysis-toggle {
-        color: #818384;
-        font-size: 12px;
-    }
-
-    .deep-analysis-copy {
-        background: none;
-        border: none;
-        color: #818384;
-        font-size: 16px;
-        cursor: pointer;
-        padding: 0 8px;
-        transition: color 0.2s;
-    }
-
-    .deep-analysis-copy:hover {
-        color: #d7dadc;
-    }
-
-    .deep-analysis-copy.copied {
-        color: #46d160;
-    }
-
-    .deep-analysis-content {
-        padding: 15px;
-        border-top: 1px solid #343536;
-    }
-
-    .deep-analysis-content.collapsed {
-        display: none;
-    }
-
-    .analysis-stat-row {
-        display: flex;
-        justify-content: space-between;
-        padding: 8px 0;
-        border-bottom: 1px solid #343536;
-    }
-
-    .analysis-stat-row:last-child {
-        border-bottom: none;
-    }
-
-    .analysis-stat-label {
-        color: #818384;
-        font-size: 13px;
-    }
-
-    .analysis-stat-value {
-        color: #d7dadc;
-        font-size: 13px;
-        font-weight: 500;
-    }
-
-    .analysis-stat-value.warning {
-        color: #ff8c42;
-    }
-
-    .analysis-stat-value.danger {
-        color: #ff6b6b;
-    }
-
-    .analysis-stat-value.success {
-        color: #46d160;
-    }
-
-    .analysis-stat-value.info {
-        color: #0079d3;
-    }
-
-    .timeline-entry {
-        display: flex;
-        padding: 8px 12px;
-        border-left: 3px solid #343536;
-        margin-bottom: 8px;
-        background-color: #1f1f21;
-        border-radius: 0 4px 4px 0;
-    }
-
-    .timeline-entry.age-increase {
-        border-left-color: #46d160;
-    }
-
-    .timeline-entry.age-decrease {
-        border-left-color: #ff6b6b;
-    }
-
-    .timeline-entry.age-same {
-        border-left-color: #818384;
-    }
-
-    .timeline-entry.first-post {
-        border-left-color: #0079d3;
-    }
-
-    .timeline-date {
-        color: #818384;
-        font-size: 11px;
-        min-width: 140px;
-    }
-
-    .timeline-age {
-        font-weight: bold;
-        min-width: 60px;
-    }
-
-    .timeline-subreddit {
-        color: #0079d3;
-        font-size: 12px;
-        min-width: 150px;
-    }
-
-    .timeline-change {
-        color: #818384;
-        font-size: 12px;
-        flex: 1;
-    }
-
-    .subreddit-comparison-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 13px;
-    }
-
-    .subreddit-comparison-table th {
-        text-align: left;
-        padding: 8px;
-        background-color: #1f1f21;
-        color: #818384;
-        font-weight: normal;
-        border-bottom: 1px solid #343536;
-    }
-
-    .subreddit-comparison-table td {
-        padding: 8px;
-        border-bottom: 1px solid #343536;
-        color: #d7dadc;
-    }
-
-    .subreddit-comparison-table tr:last-child td {
-        border-bottom: none;
-    }
-
-    .couples-track {
-        background-color: #1f1f21;
-        border: 1px solid #343536;
-        border-radius: 4px;
-        padding: 12px;
-        margin-bottom: 10px;
-    }
-
-    .couples-track-title {
-        font-weight: bold;
-        margin-bottom: 8px;
-        color: #d7dadc;
-    }
-
-    .birthday-estimate {
-        background-color: #1f1f21;
-        border-radius: 4px;
-        padding: 15px;
-        text-align: center;
-    }
-
-    .birthday-month-range {
-        font-size: 18px;
-        font-weight: bold;
-        color: #0079d3;
-        margin-bottom: 5px;
-    }
-
-    .birthday-confidence {
-        font-size: 12px;
-        color: #818384;
-    }
-
-    .fetch-more-container {
-        text-align: center;
-        padding: 15px;
-        border-top: 1px solid #343536;
-        margin-top: 15px;
-    }
-
-    .fetch-more-status {
-        color: #818384;
-        font-size: 12px;
-        margin-top: 8px;
-    }
-
-    .anomaly-item {
-        background-color: #4a1c1c;
-        border-left: 3px solid #ff6b6b;
-        padding: 10px 12px;
-        margin-bottom: 8px;
-        border-radius: 0 4px 4px 0;
-    }
-
-    .anomaly-description {
-        color: #ff6b6b;
-        font-size: 13px;
-    }
-
-    .anomaly-date {
-        color: #818384;
-        font-size: 11px;
-        margin-top: 4px;
-    }
-
-    @keyframes pulse {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.8; }
-    }
-
-    .custom-button-editor {
-        cursor: move;
-        transition: opacity 0.2s, transform 0.2s;
-    }
-
-    .custom-button-editor.dragging {
-        opacity: 0.5;
-        transform: scale(0.98);
-    }
-
-    .custom-button-editor.drag-over {
-        border-top: 3px solid #0079d3;
-    }
-
-    .custom-button-drag-handle {
-        color: #818384;
-        font-size: 18px;
-        cursor: grab;
-        user-select: none;
-        margin-right: 8px;
-    }
-
-    .custom-button-drag-handle:active {
-        cursor: grabbing;
-    }
-
-    /* Manual Search Styles */
-    .manual-search-form {
-        display: grid;
-        gap: 15px;
-    }
-
-    .manual-search-row {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 12px;
-    }
-
-    .manual-search-field {
-        display: flex;
-        flex-direction: column;
-        gap: 5px;
-    }
-
-    .manual-search-label {
-        color: #d7dadc;
-        font-size: 11px;
-        font-weight: bold;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
-
-    .manual-search-input {
-        background-color: #272729;
-        border: 1px solid #343536;
-        border-radius: 4px;
-        color: #d7dadc;
-        padding: 8px 10px;
-        font-size: 13px;
-    }
-
-    .manual-search-input:focus {
-        outline: none;
-        border-color: #0079d3;
-    }
-
-    .manual-search-select {
-        background-color: #272729;
-        border: 1px solid #343536;
-        border-radius: 4px;
-        color: #d7dadc;
-        padding: 8px 10px;
-        font-size: 13px;
-        cursor: pointer;
-    }
-
-    .manual-search-checkbox-group {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 15px;
-        padding: 10px;
-        background-color: #1f1f21;
-        border-radius: 4px;
-    }
-
-    .manual-search-checkbox-item {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-    }
-
-    .manual-search-checkbox-item label {
-        color: #d7dadc;
-        font-size: 13px;
-        cursor: pointer;
-    }
-
-    .manual-result-item {
-        background-color: #272729;
-        padding: 15px;
-        margin-bottom: 12px;
-        border-radius: 4px;
-        border-left: 3px solid #0079d3;
-    }
-
-    .manual-result-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        margin-bottom: 10px;
-        padding-bottom: 8px;
-        border-bottom: 1px solid #343536;
-    }
-
-    .manual-result-meta {
-        display: flex;
-        gap: 15px;
-        font-size: 12px;
-        color: #818384;
-        flex-wrap: wrap;
-    }
-
-    .manual-result-author {
-        color: #0079d3;
-        font-weight: bold;
-        text-decoration: none;
-    }
-
-    .manual-result-author:hover {
-        text-decoration: underline;
-    }
-
-    .manual-result-score {
-        color: #ff8c42;
-    }
-
-    .manual-result-title {
-        font-size: 15px;
-        font-weight: bold;
-        color: #d7dadc;
-        margin-bottom: 10px;
-    }
-
-    .manual-result-body {
-        color: #d7dadc;
-        font-size: 13px;
-        line-height: 1.5;
-        white-space: pre-wrap;
-        word-wrap: break-word;
-    }
-
-    .highlight-search-term {
-        background-color: #ff4500;
-        color: white;
-        padding: 2px 4px;
-        border-radius: 2px;
-        font-weight: bold;
-    }
+    /* Cascade layer for isolation */
+    @layer av-ui;
+
+    @layer av-ui {
+        @scope (.av-ui-root) {
+            /* Hard reset to escape external styling */
+            :scope, :scope * {
+                all: revert !important;
+                box-sizing: border-box !important;
+            }
+
+            /* Re-establish baseline */
+            :scope {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif !important;
+                font-size: 14px !important;
+                line-height: 1.4 !important;
+                color-scheme: dark !important;
+            }
+
+            /* Button styles */
+            .age-check-button {
+                margin: 3px;
+                padding: 2px 6px;
+                background-color: var(--av-primary);
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 11px;
+                font-weight: bold;
+            }
+
+            .age-check-button:hover {
+                background-color: #005ba1;
+            }
+
+            .age-check-button.cached {
+                background-color: var(--av-success);
+            }
+
+            .age-check-button.cached:hover {
+                background-color: #37a84e;
+            }
+
+            .age-modal {
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                background-color: var(--av-background);
+                color: var(--av-text);
+                border: 2px solid var(--av-border);
+                border-radius: 8px;
+                padding: 0;
+                z-index: 10000;
+                min-width: 400px;
+                min-height: 300px;
+                max-width: 95vw;
+                max-height: 95vh;  /* <-- Increased to 95% */
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.5);
+                display: flex;
+                flex-direction: column;
+            }
+
+            .age-modal-overlay {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background-color: rgba(0, 0, 0, 0.3);
+                z-index: 9999;
+                pointer-events: none;  /* Allow clicking through to background */
+            }
+
+            .age-modal-header {
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+                padding: 15px 20px;
+                border-bottom: 1px solid var(--av-border);
+                user-select: none;
+                flex-shrink: 0;
+            }
+
+            .age-modal-title-row {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                width: 100%;
+                gap: 12px;
+                cursor: move;  /* Drag handle */
+            }
+
+            .age-modal-title {
+                font-size: 18px;
+                font-weight: bold;
+                color: var(--av-text);
+            }
+
+            .age-modal-close {
+                background: none;
+                border: none;
+                color: var(--av-text-muted);
+                font-size: 24px;
+                cursor: pointer;
+                padding: 0;
+                width: 30px;
+                height: 30px;
+                line-height: 30px;
+                text-align: center;
+            }
+
+            .age-modal-close:hover {
+                color: var(--av-text);
+            }
+
+            .age-modal-content {
+                padding: 20px;
+                overflow-y: auto;
+                flex: 1;
+                min-height: 0;
+            }
+
+            .age-modal-topbar {
+                width: 100%;
+                background-color: #1f1f21;
+                border: 1px solid var(--av-border);
+                border-radius: 6px;
+                padding: 12px 14px;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
+            }
+
+            .age-token-input {
+                width: 100%;
+                padding: 8px;
+                background-color: var(--av-surface);
+                border: 1px solid var(--av-border);
+                border-radius: 4px;
+                color: var(--av-text);
+                font-family: monospace;
+                font-size: 12px;
+                margin-top: 10px;
+            }
+
+            .age-modal-button {
+                padding: 8px 16px;
+                background-color: var(--av-primary);
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-weight: bold;
+                margin-right: 10px;
+            }
+
+            .age-modal-button:hover {
+                background-color: #005ba1;
+            }
+
+            .age-modal-button.secondary {
+                background-color: var(--av-border);
+            }
+
+            .age-modal-button.secondary:hover {
+                background-color: #4a4a4b;
+            }
+
+            .age-modal-button.danger {
+                background-color: var(--av-danger);
+            }
+
+            .age-modal-button.danger:hover {
+                background-color: #c20022;
+            }
+
+            .age-summary {
+                background-color: var(--av-surface);
+                padding: 15px;
+                border-radius: 4px;
+                margin-bottom: 15px;
+                border-left: 4px solid var(--av-primary);
+            }
+
+            .age-summary-title {
+                margin-bottom: 4px;
+                color: var(--av-text);
+            }
+
+            .age-filter-chips {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                margin-top: 10px;
+            }
+
+            .age-chip {
+                display: inline-block;
+                padding: 4px 12px;
+                background-color: var(--av-primary);
+                color: white;
+                border-radius: 16px;
+                cursor: pointer;
+                font-size: 13px;
+                font-weight: bold;
+                transition: background-color 0.2s;
+            }
+
+            .age-chip:hover {
+                background-color: #005ba1;
+            }
+
+            .age-chip.possible {
+                background-color: var(--av-text-muted);
+            }
+
+            .age-chip.possible:hover {
+                background-color: #6b6c6e;
+            }
+
+            .age-chip.active {
+                background-color: #ff4500;
+            }
+
+            .age-chip.active:hover {
+                background-color: #cc3700;
+            }
+
+            .age-chip.posted.active {
+                background-color: #2d8a44;
+            }
+
+            .age-chip.posted.active:hover {
+                background-color: #237035;
+            }
+
+            .age-chip.possible.active {
+                background-color: var(--av-warning);
+            }
+
+            .age-chip.possible.active:hover {
+                background-color: #e67a32;
+            }
+
+            .age-filter-status-container {
+                margin-top: 10px;
+            }
+
+            .age-filter-status {
+                background-color: #ff4500;
+                color: white;
+                padding: 8px 12px;
+                border-radius: 4px;
+                margin-bottom: 10px;
+                cursor: pointer;
+                font-size: 13px;
+            }
+
+            .age-filter-status:hover {
+                background-color: #cc3700;
+            }
+
+            .age-results-container {
+                margin-bottom: 15px;
+            }
+
+            .age-result-item {
+                background-color: var(--av-surface);
+                padding: 12px;
+                margin-bottom: 10px;
+                border-radius: 4px;
+                border-left: 3px solid var(--av-primary);
+            }
+
+            .age-result-item.hidden {
+                display: none;
+            }
+
+            .age-result-header {
+                display: flex;
+                justify-content: space-between;
+                margin-bottom: 8px;
+                font-size: 13px;
+            }
+
+            .age-result-age {
+                font-weight: bold;
+                color: #ff4500;
+                font-size: 14px;
+            }
+
+            .age-result-date {
+                color: var(--av-text-muted);
+            }
+
+            .age-result-subreddit {
+                color: var(--av-primary);
+                font-weight: normal;
+            }
+
+            .age-result-snippet {
+                color: var(--av-text);
+                font-size: 12px;
+                margin: 8px 0;
+                line-height: 1.4;
+            }
+
+            .age-result-link {
+                color: var(--av-primary);
+                text-decoration: none;
+                font-size: 11px;
+            }
+
+            .age-result-link:hover {
+                text-decoration: underline;
+            }
+
+            .age-error {
+                background-color: #4a1c1c;
+                color: #ff6b6b;
+                padding: 12px;
+                border-radius: 4px;
+                border-left: 4px solid var(--av-danger);
+            }
+
+            .age-loading {
+                text-align: center;
+                padding: 20px;
+                color: var(--av-text-muted);
+            }
+
+            .age-loading::after {
+                content: '...';
+                animation: dots 1.5s steps(4, end) infinite;
+            }
+
+            @keyframes dots {
+                0%, 20% { content: '.'; }
+                40% { content: '..'; }
+                60%, 100% { content: '...'; }
+            }
+
+            .age-modal-buttons {
+                display: flex;
+                justify-content: flex-start;
+                gap: 10px;
+                padding: 15px 20px;
+                border-top: 1px solid var(--av-border);
+                flex-shrink: 0;
+            }
+
+            .age-link-text {
+                color: var(--av-primary);
+                margin: 10px 0;
+            }
+
+            .age-link-text a {
+                color: var(--av-primary);
+                text-decoration: underline;
+            }
+
+            .age-link-text a:hover {
+                color: #005ba1;
+            }
+
+            /* Resizable modal */
+            .age-modal.resizable {
+                resize: both;
+                overflow: hidden;
+            }
+
+            .highlight-age {
+                background-color: #ff4500;
+                color: white;
+                padding: 2px 4px;
+                border-radius: 2px;
+                font-weight: bold;
+            }
+
+            .highlight-age.posted {
+                background-color: var(--av-success);
+                color: white;
+            }
+
+            .highlight-age.possible {
+                background-color: var(--av-warning);
+                color: white;
+            }
+
+            .expand-link,
+            .collapse-link {
+                color: var(--av-primary);
+                cursor: pointer;
+                font-size: 11px;
+                font-weight: bold;
+                text-decoration: none;
+                user-select: none;
+            }
+
+            .expand-link:hover,
+            .collapse-link:hover {
+                color: #005ba1;
+                text-decoration: underline;
+            }
+
+            .snippet-content {
+                word-wrap: break-word;
+            }
+
+            /* Settings Modal Specific Styles */
+            .age-settings-section {
+                margin-bottom: 25px;
+                padding-bottom: 20px;
+                border-bottom: 1px solid var(--av-border);
+            }
+
+            .age-settings-section:last-child {
+                border-bottom: none;
+                margin-bottom: 0;
+            }
+
+            .age-settings-section-title {
+                font-size: 16px;
+                font-weight: bold;
+                color: var(--av-text);
+                margin-bottom: 15px;
+            }
+
+            .age-settings-row {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                margin-bottom: 12px;
+                gap: 15px;
+            }
+
+            .age-settings-label {
+                color: var(--av-text);
+                font-size: 13px;
+                flex: 1;
+            }
+
+            .age-settings-input {
+                background-color: var(--av-surface);
+                border: 1px solid var(--av-border);
+                border-radius: 4px;
+                color: var(--av-text);
+                padding: 6px 10px;
+                font-size: 13px;
+                width: 80px;
+            }
+
+            .age-settings-input:focus {
+                outline: none;
+                border-color: var(--av-primary);
+            }
+
+            .age-settings-checkbox {
+                width: 18px;
+                height: 18px;
+                cursor: pointer;
+            }
+
+            .age-settings-textarea {
+                width: 100%;
+                min-height: 100px;
+                background-color: var(--av-surface);
+                border: 1px solid var(--av-border);
+                border-radius: 4px;
+                color: var(--av-text);
+                padding: 8px;
+                font-size: 12px;
+                font-family: monospace;
+                resize: vertical;
+            }
+
+            .age-settings-textarea:focus {
+                outline: none;
+                border-color: var(--av-primary);
+            }
+
+            .age-ignored-users-list {
+                max-height: 150px;
+                overflow-y: auto;
+                background-color: var(--av-surface);
+                border: 1px solid var(--av-border);
+                border-radius: 4px;
+                padding: 8px;
+                margin-top: 10px;
+            }
+
+            .age-ignored-user-item {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 4px 8px;
+                margin-bottom: 4px;
+                background-color: var(--av-background);
+                border-radius: 3px;
+            }
+
+            .age-ignored-user-name {
+                color: var(--av-text);
+                font-size: 12px;
+                font-family: monospace;
+            }
+
+            .age-ignored-user-remove {
+                background-color: var(--av-danger);
+                color: white;
+                border: none;
+                border-radius: 3px;
+                padding: 2px 8px;
+                font-size: 11px;
+                cursor: pointer;
+                font-weight: bold;
+            }
+
+            .age-ignored-user-remove:hover {
+                background-color: #c20022;
+            }
+
+            .age-settings-bot-list {
+                display: grid;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 10px;
+                margin-top: 10px;
+            }
+
+            .age-settings-bot-item {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+
+            .age-settings-bot-label {
+                color: var(--av-text);
+                font-size: 12px;
+                font-family: monospace;
+            }
+
+            .age-settings-buttons-row {
+                display: flex;
+                gap: 10px;
+                margin-top: 15px;
+            }
+
+            .age-settings-gear {
+                background: none;
+                border: none;
+                color: var(--av-text-muted);
+                font-size: 20px;
+                cursor: pointer;
+                padding: 0;
+                width: 30px;
+                height: 30px;
+                line-height: 30px;
+                text-align: center;
+                margin-left: 10px;
+            }
+
+            .age-settings-gear:hover {
+                color: var(--av-text);
+            }
+
+            .age-settings-help-text {
+                color: var(--av-text-muted);
+                font-size: 11px;
+                margin-top: 5px;
+                font-style: italic;
+            }
+
+            /* Deep Analysis Modal Styles */
+            .deep-analysis-section {
+                background-color: var(--av-surface);
+                border: 1px solid var(--av-border);
+                border-radius: 6px;
+                margin-bottom: 15px;
+                overflow: hidden;
+            }
+
+            .deep-analysis-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 12px 15px;
+                background-color: #1f1f21;
+                cursor: pointer;
+                user-select: none;
+            }
+
+            .deep-analysis-header:hover {
+                background-color: #2a2a2c;
+            }
+
+            .deep-analysis-title {
+                font-weight: bold;
+                font-size: 14px;
+                color: var(--av-text);
+            }
+
+            .deep-analysis-toggle {
+                color: var(--av-text-muted);
+                font-size: 12px;
+            }
+
+            .deep-analysis-copy {
+                background: none;
+                border: none;
+                color: var(--av-text-muted);
+                font-size: 16px;
+                cursor: pointer;
+                padding: 0 8px;
+                transition: color 0.2s;
+            }
+
+            .deep-analysis-copy:hover {
+                color: var(--av-text);
+            }
+
+            .deep-analysis-copy.copied {
+                color: var(--av-success);
+            }
+
+            .deep-analysis-content {
+                padding: 15px;
+                border-top: 1px solid var(--av-border);
+            }
+
+            .deep-analysis-content.collapsed {
+                display: none;
+            }
+
+            .analysis-stat-row {
+                display: flex;
+                justify-content: space-between;
+                padding: 8px 0;
+                border-bottom: 1px solid var(--av-border);
+            }
+
+            .analysis-stat-row:last-child {
+                border-bottom: none;
+            }
+
+            .analysis-stat-label {
+                color: var(--av-text-muted);
+                font-size: 13px;
+            }
+
+            .analysis-stat-value {
+                color: var(--av-text);
+                font-size: 13px;
+                font-weight: 500;
+            }
+
+            .analysis-stat-value.warning {
+                color: var(--av-warning);
+            }
+
+            .analysis-stat-value.danger {
+                color: #ff6b6b;
+            }
+
+            .analysis-stat-value.success {
+                color: var(--av-success);
+            }
+
+            .analysis-stat-value.info {
+                color: var(--av-primary);
+            }
+
+            .timeline-entry {
+                display: flex;
+                padding: 8px 12px;
+                border-left: 3px solid var(--av-border);
+                margin-bottom: 8px;
+                background-color: #1f1f21;
+                border-radius: 0 4px 4px 0;
+            }
+
+            .timeline-entry.age-increase {
+                border-left-color: var(--av-success);
+            }
+
+            .timeline-entry.age-decrease {
+                border-left-color: #ff6b6b;
+            }
+
+            .timeline-entry.age-same {
+                border-left-color: var(--av-text-muted);
+            }
+
+            .timeline-entry.first-post {
+                border-left-color: var(--av-primary);
+            }
+
+            .timeline-date {
+                color: var(--av-text-muted);
+                font-size: 11px;
+                min-width: 140px;
+            }
+
+            .timeline-age {
+                font-weight: bold;
+                min-width: 60px;
+            }
+
+            .timeline-subreddit {
+                color: var(--av-primary);
+                font-size: 12px;
+                min-width: 150px;
+            }
+
+            .timeline-change {
+                color: var(--av-text-muted);
+                font-size: 12px;
+                flex: 1;
+            }
+
+            .subreddit-comparison-table {
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 13px;
+            }
+
+            .subreddit-comparison-table th {
+                text-align: left;
+                padding: 8px;
+                background-color: #1f1f21;
+                color: var(--av-text-muted);
+                font-weight: normal;
+                border-bottom: 1px solid var(--av-border);
+            }
+
+            .subreddit-comparison-table td {
+                padding: 8px;
+                border-bottom: 1px solid var(--av-border);
+                color: var(--av-text);
+            }
+
+            .subreddit-comparison-table tr:last-child td {
+                border-bottom: none;
+            }
+
+            .couples-track {
+                background-color: #1f1f21;
+                border: 1px solid var(--av-border);
+                border-radius: 4px;
+                padding: 12px;
+                margin-bottom: 10px;
+            }
+
+            .couples-track-title {
+                font-weight: bold;
+                margin-bottom: 8px;
+                color: var(--av-text);
+            }
+
+            .birthday-estimate {
+                background-color: #1f1f21;
+                border-radius: 4px;
+                padding: 15px;
+                text-align: center;
+            }
+
+            .birthday-month-range {
+                font-size: 18px;
+                font-weight: bold;
+                color: var(--av-primary);
+                margin-bottom: 5px;
+            }
+
+            .birthday-confidence {
+                font-size: 12px;
+                color: var(--av-text-muted);
+            }
+
+            .fetch-more-container {
+                text-align: center;
+                padding: 15px;
+                border-top: 1px solid var(--av-border);
+                margin-top: 15px;
+            }
+
+            .fetch-more-status {
+                color: var(--av-text-muted);
+                font-size: 12px;
+                margin-top: 8px;
+            }
+
+            .anomaly-item {
+                background-color: #4a1c1c;
+                border-left: 3px solid #ff6b6b;
+                padding: 10px 12px;
+                margin-bottom: 8px;
+                border-radius: 0 4px 4px 0;
+            }
+
+            .anomaly-description {
+                color: #ff6b6b;
+                font-size: 13px;
+            }
+
+            .anomaly-date {
+                color: var(--av-text-muted);
+                font-size: 11px;
+                margin-top: 4px;
+            }
+
+            @keyframes pulse {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.8; }
+            }
+
+            .custom-button-editor {
+                cursor: move;
+                transition: opacity 0.2s, transform 0.2s;
+            }
+
+            .custom-button-editor.dragging {
+                opacity: 0.5;
+                transform: scale(0.98);
+            }
+
+            .custom-button-editor.drag-over {
+                border-top: 3px solid var(--av-primary);
+            }
+
+            .custom-button-drag-handle {
+                color: var(--av-text-muted);
+                font-size: 18px;
+                cursor: grab;
+                user-select: none;
+                margin-right: 8px;
+            }
+
+            .custom-button-drag-handle:active {
+                cursor: grabbing;
+            }
+
+            /* Manual Search Styles */
+            .manual-search-form {
+                display: grid;
+                gap: 15px;
+            }
+
+            .manual-search-row {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 12px;
+            }
+
+            .manual-search-field {
+                display: flex;
+                flex-direction: column;
+                gap: 5px;
+            }
+
+            .manual-search-label {
+                color: var(--av-text);
+                font-size: 11px;
+                font-weight: bold;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+
+            .manual-search-input {
+                background-color: var(--av-surface);
+                border: 1px solid var(--av-border);
+                border-radius: 4px;
+                color: var(--av-text);
+                padding: 8px 10px;
+                font-size: 13px;
+            }
+
+            .manual-search-input:focus {
+                outline: none;
+                border-color: var(--av-primary);
+            }
+
+            .manual-search-select {
+                background-color: var(--av-surface);
+                border: 1px solid var(--av-border);
+                border-radius: 4px;
+                color: var(--av-text);
+                padding: 8px 10px;
+                font-size: 13px;
+                cursor: pointer;
+            }
+
+            .manual-search-checkbox-group {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 15px;
+                padding: 10px;
+                background-color: #1f1f21;
+                border-radius: 4px;
+            }
+
+            .manual-search-checkbox-item {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+            }
+
+            .manual-search-checkbox-item label {
+                color: var(--av-text);
+                font-size: 13px;
+                cursor: pointer;
+            }
+
+            .manual-result-item {
+                background-color: var(--av-surface);
+                padding: 15px;
+                margin-bottom: 12px;
+                border-radius: 4px;
+                border-left: 3px solid var(--av-primary);
+            }
+
+            .manual-result-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                margin-bottom: 10px;
+                padding-bottom: 8px;
+                border-bottom: 1px solid var(--av-border);
+            }
+
+            .manual-result-meta {
+                display: flex;
+                gap: 15px;
+                font-size: 12px;
+                color: var(--av-text-muted);
+                flex-wrap: wrap;
+            }
+
+            .manual-result-author {
+                color: var(--av-primary);
+                font-weight: bold;
+                text-decoration: none;
+            }
+
+            .manual-result-author:hover {
+                text-decoration: underline;
+            }
+
+            .manual-result-score {
+                color: var(--av-warning);
+            }
+
+            .manual-result-title {
+                font-size: 15px;
+                font-weight: bold;
+                color: var(--av-text);
+                margin-bottom: 10px;
+            }
+
+            .manual-result-body {
+                color: var(--av-text);
+                font-size: 13px;
+                line-height: 1.5;
+                white-space: pre-wrap;
+                word-wrap: break-word;
+            }
+
+            .highlight-search-term {
+                background-color: #ff4500;
+                color: white;
+                padding: 2px 4px;
+                border-radius: 2px;
+                font-weight: bold;
+            }
+
+        } /* end @scope */
+
+    } /* end @layer */
 
 `);
 
@@ -1326,8 +1422,8 @@ function handleOAuthAutoClick() {
 
                             // Show success and close window
                             document.body.innerHTML = `
-                                <div style="font-family: Arial; padding: 40px; text-align: center; background: #1a1a1b; color: #d7dadc; min-height: 100vh;">
-                                    <h2 style="color: #46d160;">✓ Token Captured Successfully!</h2>
+                                <div style="font-family: Arial; padding: 40px; text-align: center; background: var(--av-background); color: var(--av-text); min-height: 100vh;">
+                                    <h2 style="color: var(--av-success);">✓ Token Captured Successfully!</h2>
                                     <p>This window will close automatically...</p>
                                 </div>
                             `;
@@ -1347,8 +1443,8 @@ function handleOAuthAutoClick() {
                             saveToken(token);
 
                             document.body.innerHTML = `
-                                <div style="font-family: Arial; padding: 40px; text-align: center; background: #1a1a1b; color: #d7dadc; min-height: 100vh;">
-                                    <h2 style="color: #46d160;">✓ Token Captured Successfully!</h2>
+                                <div style="font-family: Arial; padding: 40px; text-align: center; background: var(--av-background); color: var(--av-text); min-height: 100vh;">
+                                    <h2 style="color: var(--av-success);">✓ Token Captured Successfully!</h2>
                                     <p>This window will close automatically...</p>
                                 </div>
                             `;
@@ -1460,10 +1556,10 @@ function handleCallbackTokenExtraction() {
 
                 // Show success message
                 document.body.innerHTML = `
-                    <div style="font-family: Arial; padding: 40px; text-align: center; background: #1a1a1b; color: #d7dadc; min-height: 100vh;">
-                        <h2 style="color: #46d160;">✓ Token Captured Successfully!</h2>
+                    <div style="font-family: Arial; padding: 40px; text-align: center; background: var(--av-background); color: var(--av-text); min-height: 100vh;">
+                        <h2 style="color: var(--av-success);">✓ Token Captured Successfully!</h2>
                         <p>This window will close automatically...</p>
-                        <p style="font-size: 12px; color: #818384; margin-top: 20px;">Token: ${token.substring(0, 30)}...</p>
+                        <p style="font-size: 12px; color: var(--av-text-muted); margin-top: 20px;">Token: ${token.substring(0, 30)}...</p>
                     </div>
                 `;
 
@@ -1479,15 +1575,15 @@ function handleCallbackTokenExtraction() {
 
                 // Fallback: Display token for manual copy
                 document.body.innerHTML = `
-                    <div style="font-family: Arial; padding: 40px; text-align: center; background: #1a1a1b; color: #d7dadc; min-height: 100vh;">
+                    <div style="font-family: Arial; padding: 40px; text-align: center; background: var(--av-background); color: var(--av-text); min-height: 100vh;">
                         <h2>Token Retrieved</h2>
                         <p>Copy this token and paste it into the Age Verifier:</p>
                         <input type="text" value="${token}" readonly
-                               style="width: 80%; padding: 10px; font-family: monospace; font-size: 14px; background: #272729; color: #d7dadc; border: 1px solid #343536;"
+                               style="width: 80%; padding: 10px; font-family: monospace; font-size: 14px; background: var(--av-surface); color: var(--av-text); border: 1px solid var(--av-border);"
                                onclick="this.select()">
                         <br><br>
                         <button onclick="navigator.clipboard.writeText('${token}').then(() => alert('Copied!'))"
-                                style="padding: 10px 20px; background: #0079d3; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                                style="padding: 10px 20px; background: var(--av-primary); color: white; border: none; border-radius: 4px; cursor: pointer;">
                             Copy to Clipboard
                         </button>
                     </div>
@@ -1537,12 +1633,12 @@ function showTokenModal(pendingUsername = null) {
             <p>This tool requires a PushShift API token to verify user ages.</p>
             <p><strong>To get your token:</strong></p>
             <ol style="margin-left: 20px; line-height: 1.6;">
-                <li>Visit the <a href="${PUSHSHIFT_AUTH_URL}" target="_blank" style="color: #0079d3;">PushShift Authorization page</a></li>
+                <li>Visit the <a href="${PUSHSHIFT_AUTH_URL}" target="_blank" style="color: var(--av-primary);">PushShift Authorization page</a></li>
                 <li>Sign in with your Reddit account and authorize</li>
-                <li>After authorization, copy the <code style="background: #272729; padding: 2px 6px; border-radius: 3px;">access_token</code> from the callback page</li>
+                <li>After authorization, copy the <code style="background: var(--av-surface); padding: 2px 6px; border-radius: 3px;">access_token</code> from the callback page</li>
                 <li>Paste it below</li>
             </ol>
-            <p style="font-size: 12px; color: #818384;">Your token will be cached for 24 hours.</p>
+            <p style="font-size: 12px; color: var(--av-text-muted);">Your token will be cached for 24 hours.</p>
             <input type="text" class="age-token-input" placeholder="Paste your API token here..." />
         </div>
         <div class="age-modal-buttons">
@@ -1697,7 +1793,7 @@ function showSettingsModal() {
                 <div class="age-settings-section-title">📊 Cache Statistics</div>
 
                 <div style="margin-bottom: 15px;">
-                    <div style="font-weight: bold; margin-bottom: 8px; color: #d7dadc;">Profile Cache (Age Data)</div>
+                    <div style="font-weight: bold; margin-bottom: 8px; color: var(--av-text);">Profile Cache (Age Data)</div>
                     <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
                         <span class="analysis-stat-label">Cached Users</span>
                         <span class="analysis-stat-value">${(() => {
@@ -1746,7 +1842,7 @@ function showSettingsModal() {
                 </div>
 
                 <div style="margin-bottom: 15px;">
-                    <div style="font-weight: bold; margin-bottom: 8px; color: #d7dadc;">Button Cache (Display Text)</div>
+                    <div style="font-weight: bold; margin-bottom: 8px; color: var(--av-text);">Button Cache (Display Text)</div>
                     <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
                         <span class="analysis-stat-label">Cached Buttons</span>
                         <span class="analysis-stat-value">${(() => {
@@ -1785,6 +1881,46 @@ function showSettingsModal() {
                 <span class="age-settings-help-text" style="display: block; margin-top: 8px;">
                     Profile cache stores full age data. Button cache stores display text only.
                 </span>
+            </div>
+
+            <!-- Theme Settings -->
+            <div class="age-settings-section">
+                <div class="age-settings-section-title">🎨 Theme & Colors</div>
+
+                <div class="age-settings-row">
+                    <label class="age-settings-label">Theme Preset</label>
+                    <select class="age-settings-input" id="setting-theme-preset" style="width: 180px;">
+                        <option value="default" ${userSettings.themePreset === 'default' ? 'selected' : ''}>Default Dark</option>
+                        <option value="light" ${userSettings.themePreset === 'light' ? 'selected' : ''}>Light Mode</option>
+                        <option value="high-contrast" ${userSettings.themePreset === 'high-contrast' ? 'selected' : ''}>High Contrast</option>
+                        <option value="custom" ${userSettings.themePreset === 'custom' ? 'selected' : ''}>Custom Colors</option>
+                    </select>
+                </div>
+
+                <div class="age-settings-row">
+                    <label class="age-settings-label">Button Color (Default)</label>
+                    <input type="color" class="age-settings-input" id="setting-button-default-color"
+                           value="${userSettings.buttonDefaultColor}" style="width: 80px; height: 40px;">
+                </div>
+
+                <div class="age-settings-row">
+                    <label class="age-settings-label">Button Color (Cached)</label>
+                    <input type="color" class="age-settings-input" id="setting-button-cached-color"
+                           value="${userSettings.buttonCachedColor}" style="width: 80px; height: 40px;">
+                </div>
+
+                <div id="custom-colors-section" style="display: ${userSettings.themePreset === 'custom' ? 'block' : 'none'}; margin-top: 15px; padding: 15px; background-color: var(--av-surface); border-radius: 4px;">
+                    <div style="font-weight: bold; margin-bottom: 10px;">Custom Theme Colors</div>
+                    ${Object.keys(DEFAULT_SETTINGS.customColors).map(colorKey => `
+                        <div class="age-settings-row">
+                            <label class="age-settings-label">${colorKey.charAt(0).toUpperCase() + colorKey.slice(1)}</label>
+                            <input type="color" class="age-settings-input custom-color-input"
+                                   data-color-key="${colorKey}"
+                                   value="${userSettings.customColors[colorKey]}"
+                                   style="width: 80px; height: 40px;">
+                        </div>
+                    `).join('')}
+                </div>
             </div>
 
             <!-- General Settings -->
@@ -2023,6 +2159,14 @@ function showSettingsModal() {
     closeBtn.onclick = closeModal;
     cancelBtn.onclick = closeModal;
 
+    // Theme preset change handler
+    const themePresetSelect = modal.querySelector('#setting-theme-preset');
+    const customColorsSection = modal.querySelector('#custom-colors-section');
+
+    themePresetSelect.addEventListener('change', () => {
+        customColorsSection.style.display = themePresetSelect.value === 'custom' ? 'block' : 'none';
+    });
+
     saveBtn.onclick = () => {
         const oldSortOrder = userSettings.defaultSort;
 
@@ -2036,9 +2180,18 @@ function showSettingsModal() {
         const minCouplesGapInput = parseInt(modal.querySelector('#setting-min-couples-gap').value);
         const minCouplesGapValidated = Math.max(4, Math.min(10, minCouplesGapInput)); // Clamp to 4-10
 
+        const customColors = {};
+        modal.querySelectorAll('.custom-color-input').forEach(input => {
+            customColors[input.dataset.colorKey] = input.value;
+        });
+
         const newSettings = {
             defaultButtonText: modal.querySelector('#setting-button-text').value.trim() || 'PushShift',
             debugMode: modal.querySelector('#setting-debug').checked,
+            themePreset: modal.querySelector('#setting-theme-preset').value,
+            buttonDefaultColor: modal.querySelector('#setting-button-default-color').value,
+            buttonCachedColor: modal.querySelector('#setting-button-cached-color').value,
+            customColors: customColors,
             minAge: parseInt(modal.querySelector('#setting-min-age').value),
             maxAge: parseInt(modal.querySelector('#setting-max-age').value),
             enableVeryLowConfidence: modal.querySelector('#setting-very-low-confidence').checked,
@@ -4593,7 +4746,7 @@ function showManualSearchResults(searchData) {
             <p>Your search returned no results. Try adjusting your search criteria.</p>
         </div>`;
     } else {
-        resultsHTML = `<div style="color: #46d160; font-weight: bold; margin-bottom: 15px; padding: 10px; background-color: #1f1f21; border-radius: 4px;">
+        resultsHTML = `<div style="color: var(--av-success); font-weight: bold; margin-bottom: 15px; padding: 10px; background-color: #1f1f21; border-radius: 4px;">
             Found ${results.length} ${results.length === 1 ? 'result' : 'results'}
         </div>`;
 
@@ -4649,7 +4802,7 @@ function showManualSearchResults(searchData) {
                     <div class="manual-result-header">
                         <div class="manual-result-meta">
                             <a href="https://reddit.com/user/${result.author}" target="_blank" class="manual-result-author">u/${result.author}</a>
-                            <a href="https://reddit.com/r/${result.subreddit}" target="_blank" style="color: #0079d3;">r/${result.subreddit}</a>
+                            <a href="https://reddit.com/r/${result.subreddit}" target="_blank" style="color: var(--av-primary);">r/${result.subreddit}</a>
                             <span class="manual-result-score">Score: ${result.score || 0}</span>
                         </div>
                         <span class="age-result-date">${formattedDate}</span>
@@ -4894,7 +5047,7 @@ function showResultsModal(username, ageData) {
         if (ageEstimate && userSettings.showAgeEstimation) {
             if (ageEstimate.skipped) {
                 // Show anomaly warning instead of estimate
-                estimateHTML = `<p style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #343536;">
+                estimateHTML = `<p style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--av-border);">
                     <strong style="color: #ff6b6b;">⚠ Age Anomaly Detected</strong>
                     <br>
                     <span style="color: #ff6b6b; font-size: 12px;">${ageEstimate.message}</span>
@@ -4902,30 +5055,30 @@ function showResultsModal(username, ageData) {
             } else {
                 // Show estimate
                 const confidenceColors = {
-                    'High': '#46d160',
-                    'Medium': '#ff8c42',
+                    'High': 'var(--av-success)',
+                    'Medium': 'var(--av-warning)',
                     'Low': '#ffa500',
                     'Very Low': '#ff6b6b'
                 };
-                const confidenceColor = confidenceColors[ageEstimate.confidence] || '#818384';
+                const confidenceColor = confidenceColors[ageEstimate.confidence] || 'var(--av-text-muted)';
 
                 let anomalyNote = '';
                 if (ageEstimate.anomaliesDetected || ageEstimate.majorJump) {
-                    anomalyNote = '<br><span style="color: #ff8c42; font-size: 11px;">⚠ Age inconsistencies detected in data</span>';
+                    anomalyNote = '<br><span style="color: var(--av-warning); font-size: 11px;">⚠ Age inconsistencies detected in data</span>';
                 }
 
                 let couplesNote = '';
                 if (ageEstimate.couplesAccount) {
-                    couplesNote = '<br><span style="color: #ff8c42; font-size: 11px;">👥 Couples/Shared Account Detected - see Deep Analysis for details</span>';
+                    couplesNote = '<br><span style="color: var(--av-warning); font-size: 11px;">👥 Couples/Shared Account Detected - see Deep Analysis for details</span>';
                 }
 
-                estimateHTML = `<p style="margin-top: 8px; padding-top: 4px; border-top: 1px solid #343536;">
+                estimateHTML = `<p style="margin-top: 8px; padding-top: 4px; border-top: 1px solid var(--av-border);">
                     <strong>Estimated Current Age:</strong>
                     <span style="color: ${confidenceColor}; font-weight: bold; font-size: 16px;">${ageEstimate.estimatedAge}</span>
-                    <span style="color: #818384; font-size: 12px;"> (${ageEstimate.confidence} Confidence)</span>
-                    ${ageEstimate.couplesAccount ? '<span style="color: #ff8c42; font-size: 12px;"> 👥 Couples Account</span>' : ''}
+                    <span style="color: var(--av-text-muted); font-size: 12px;"> (${ageEstimate.confidence} Confidence)</span>
+                    ${ageEstimate.couplesAccount ? '<span style="color: var(--av-warning); font-size: 12px;"> 👥 Couples Account</span>' : ''}
                     <br>
-                    <span style="color: #818384; font-size: 11px;">Based on ${ageEstimate.dataPoints} data point${ageEstimate.dataPoints > 1 ? 's' : ''} spanning ${ageEstimate.yearSpan} year${ageEstimate.yearSpan !== 1 ? 's' : ''}</span>
+                    <span style="color: var(--av-text-muted); font-size: 11px;">Based on ${ageEstimate.dataPoints} data point${ageEstimate.dataPoints > 1 ? 's' : ''} spanning ${ageEstimate.yearSpan} year${ageEstimate.yearSpan !== 1 ? 's' : ''}</span>
                     ${anomalyNote}
                     ${couplesNote}
                 </p>`;
@@ -4965,10 +5118,10 @@ function showResultsModal(username, ageData) {
         resultsHTML = '<div class="age-results-container">';
         results.forEach((result, index) => {
             const postedBadge = result.postedAges.length > 0
-                ? `<span style="color: #46d160;">✓ ${result.postedAges.join(', ')}</span>`
+                ? `<span style="color: var(--av-success);">✓ ${result.postedAges.join(', ')}</span>`
                 : '';
             const possibleBadge = result.possibleAges.length > 0
-                ? `<span style="color: #818384;">? ${result.possibleAges.join(', ')}</span>`
+                ? `<span style="color: var(--av-text-muted);">? ${result.possibleAges.join(', ')}</span>`
                 : '';
 
             // Process title
@@ -5383,8 +5536,12 @@ function showErrorModal(username, error) {
     overlay.className = 'age-modal-overlay';
     overlay.dataset.modalId = modalId;
 
+    const wrapper = document.createElement('div');
+    wrapper.className = 'av-ui-root';
+
     const modal = document.createElement('div');
     modal.className = 'age-modal';
+
     modal.dataset.modalId = modalId;
     modal.style.zIndex = ++zIndexCounter;
 
@@ -5405,7 +5562,8 @@ function showErrorModal(username, error) {
 
     // Don't append overlay
     // document.body.appendChild(overlay);
-    document.body.appendChild(modal);
+    wrapper.appendChild(modal);
+    document.body.appendChild(wrapper);
 
     makeDraggable(modal);
     modal.addEventListener('mousedown', (e) => {
@@ -5848,7 +6006,7 @@ function notifyResultsModalOfNewData(username) {
         <span>📊 New data available (click to refresh with updated results)</span>
     `;
     banner.style.cssText = `
-        background-color: #0079d3;
+        background-color: var(--av-primary);
         color: white;
         padding: 10px 15px;
         margin-bottom: 10px;
@@ -6064,7 +6222,7 @@ function buildAnomaliesSection(analysis) {
                     </div>
                 </div>
                 <div class="deep-analysis-content">
-                    <p style="color: #46d160;">✓ No age anomalies detected. User ages normally over time.</p>
+                    <p style="color: var(--av-success);">✓ No age anomalies detected. User ages normally over time.</p>
                 </div>
             </div>
         `;
@@ -6081,7 +6239,7 @@ function buildAnomaliesSection(analysis) {
                 <div class="anomaly-date">
                     ${a.fromDate} (r/${a.fromSubreddit}) → ${a.toDate} (r/${a.toSubreddit})
                     <br>${a.daysBetween} days between posts
-                    <a href="${a.permalink}" target="_blank" style="margin-left: 10px; color: #0079d3;">View Post →</a>
+                    <a href="${a.permalink}" target="_blank" style="margin-left: 10px; color: var(--av-primary);">View Post →</a>
                 </div>
             </div>
         `).join('');
@@ -6103,7 +6261,7 @@ function buildAnomaliesSection(analysis) {
     if (staleAges.length > 0) {
         const severityColors = {
             'High': '#ff6b6b',
-            'Medium': '#ff8c42',
+            'Medium': 'var(--av-warning)',
             'Low': '#ffa500'
         };
 
@@ -6115,20 +6273,20 @@ function buildAnomaliesSection(analysis) {
                 </div>
                 <div class="anomaly-date">
                     First: ${s.firstDate} (r/${s.firstSubreddit})
-                    <a href="${s.firstPermalink}" target="_blank" style="margin-left: 10px; color: #0079d3;">View →</a>
+                    <a href="${s.firstPermalink}" target="_blank" style="margin-left: 10px; color: var(--av-primary);">View →</a>
                     <br>
                     Last: ${s.lastDate} (r/${s.lastSubreddit})
-                    <a href="${s.lastPermalink}" target="_blank" style="margin-left: 10px; color: #0079d3;">View →</a>
+                    <a href="${s.lastPermalink}" target="_blank" style="margin-left: 10px; color: var(--av-primary);">View →</a>
                 </div>
             </div>
         `).join('');
 
         staleHTML = `
             <div style="margin-bottom: 20px;">
-                <p style="color: #ff8c42; font-weight: bold; margin-bottom: 10px;">
+                <p style="color: var(--av-warning); font-weight: bold; margin-bottom: 10px;">
                     ⏰ Stale Age Detection (${staleAges.length} instance${staleAges.length > 1 ? 's' : ''})
                 </p>
-                <p style="color: #ff8c42; margin-bottom: 15px; font-size: 13px;">
+                <p style="color: var(--av-warning); margin-bottom: 15px; font-size: 13px;">
                     User posted the same age for over a year, indicating consistent age falsification.
                     <br><span style="font-size: 11px;">Severity: Low (13-14mo), Medium (14-15mo), High (15+mo)</span>
                 </p>
@@ -6166,7 +6324,7 @@ function buildSubredditSection(analysis) {
                     </div>
                 </div>
                 <div class="deep-analysis-content">
-                    <p style="color: #818384;">No tracked subreddits configured. Add subreddits in Settings to compare age behavior.</p>
+                    <p style="color: var(--av-text-muted);">No tracked subreddits configured. Add subreddits in Settings to compare age behavior.</p>
                 </div>
             </div>
         `;
@@ -6180,12 +6338,12 @@ function buildSubredditSection(analysis) {
                 <br>Posts as ${comparison.trackedAgeRange.ages.join(', ')} on tracked subs, but ${comparison.otherAgeRange.ages.join(', ')} elsewhere.
             </p>`;
         } else if (comparison.onlyYoungerOnTracked) {
-            warningHTML = `<p style="color: #ff8c42; margin-bottom: 15px;">
+            warningHTML = `<p style="color: var(--av-warning); margin-bottom: 15px;">
                 ⚠️ User posts younger ages on your subreddits.
                 <br>Posts as ${comparison.trackedAgeRange.ages.join(', ')} on tracked subs, but ${comparison.otherAgeRange.ages.join(', ')} elsewhere.
             </p>`;
         } else {
-            warningHTML = `<p style="color: #ff8c42; margin-bottom: 15px;">
+            warningHTML = `<p style="color: var(--av-warning); margin-bottom: 15px;">
                 ⚠️ Age discrepancy detected between tracked and other subreddits.
             </p>`;
         }
@@ -6244,10 +6402,10 @@ function buildBirthdaySection(analysis) {
                     </div>
                 </div>
                 <div class="deep-analysis-content">
-                    <p style="color: #818384;">
+                    <p style="color: var(--av-text-muted);">
                         ${birthday && birthday.reason ? birthday.reason : 'Unable to estimate birthday from available data.'}
                     </p>
-                    <p style="color: #818384; font-size: 12px; margin-top: 10px;">
+                    <p style="color: var(--av-text-muted); font-size: 12px; margin-top: 10px;">
                         Birthday estimation requires consistent age progression data (ideally seeing a user turn from one age to the next).
                     </p>
                 </div>
@@ -6256,14 +6414,14 @@ function buildBirthdaySection(analysis) {
     }
 
     const confidenceColors = {
-        'High': '#46d160',
-        'Medium': '#ff8c42',
+        'High': 'var(--av-success)',
+        'Medium': 'var(--av-warning)',
         'Low': '#ffa500',
         'Very Low': '#ff6b6b'
     };
 
     const dayPrecisionNote = birthday.dayRange && birthday.dayRange.transitionsUsed ?
-        `<div style="color: #818384; font-size: 11px; margin-top: 8px;">
+        `<div style="color: var(--av-text-muted); font-size: 11px; margin-top: 8px;">
             Day-level precision from ${birthday.dayRange.transitionsUsed} transition${birthday.dayRange.transitionsUsed > 1 ? 's' : ''}
             ${birthday.dayRange.note ? ` (${birthday.dayRange.note})` : ''}
         </div>` : '';
@@ -6302,12 +6460,12 @@ function buildCouplesSection(analysis) {
                     </div>
                 </div>
                 <div class="deep-analysis-content">
-                    <p style="color: #46d160;">✓ No couples/shared account pattern detected.</p>
-                    <p style="color: #818384; font-size: 12px; margin-top: 10px;">
+                    <p style="color: var(--av-success);">✓ No couples/shared account pattern detected.</p>
+                    <p style="color: var(--av-text-muted); font-size: 12px; margin-top: 10px;">
                         ${couples ? couples.explanation : 'Couples detection looks for two distinct age groups that both age appropriately over time.'}
                     </p>
                     ${couples && couples.ageGapConsistency > 0 ? `
-                    <p style="color: #818384; font-size: 11px; margin-top: 5px;">
+                    <p style="color: var(--av-text-muted); font-size: 11px; margin-top: 5px;">
                         Debug: interleave=${(couples.interleaveRatio * 100).toFixed(0)}%,
                         gapConsistency=${(couples.ageGapConsistency * 100).toFixed(0)}%
                     </p>
@@ -6376,7 +6534,7 @@ function buildCouplesSection(analysis) {
                 <span class="deep-analysis-toggle">▼ Hide</span>
             </div>
             <div class="deep-analysis-content">
-                <p style="color: #ff8c42; margin-bottom: 15px;">
+                <p style="color: var(--av-warning); margin-bottom: 15px;">
                     ⚠️ This appears to be a shared/couples account with two people of different ages.
                 </p>
                 <div style="background-color: #1f1f21; padding: 10px; border-radius: 4px; margin-bottom: 15px;">
@@ -6412,7 +6570,7 @@ function buildTimelineSection(analysis) {
                     <span class="deep-analysis-toggle">▼ Hide</span>
                 </div>
                 <div class="deep-analysis-content">
-                    <p style="color: #818384;">No timeline data available.</p>
+                    <p style="color: var(--av-text-muted);">No timeline data available.</p>
                 </div>
             </div>
         `;
@@ -6445,7 +6603,7 @@ function buildTimelineSection(analysis) {
                 <span class="timeline-date">${new Date(point.timestamp * 1000).toLocaleDateString('en-US', {
                     year: 'numeric', month: 'short', day: 'numeric'
                 })}</span>
-                <span class="timeline-age" style="color: ${entryClass === 'age-decrease' ? '#ff6b6b' : '#d7dadc'};">
+                <span class="timeline-age" style="color: ${entryClass === 'age-decrease' ? '#ff6b6b' : 'var(--av-text)'};">
                     Age: ${point.age}
                 </span>
                 <span class="timeline-subreddit"><a href="https://old.reddit.com/r/${point.subreddit}" target="_blank">r/${point.subreddit}</a></span>
@@ -6468,7 +6626,7 @@ function buildTimelineSection(analysis) {
                 </div>
             </div>
             <div class="deep-analysis-content">
-                ${hiddenCount > 0 ? `<p style="color: #818384; margin-bottom: 10px; font-size: 12px;">Showing most recent 50 entries. ${hiddenCount} older entries hidden.</p>` : ''}
+                ${hiddenCount > 0 ? `<p style="color: var(--av-text-muted); margin-bottom: 10px; font-size: 12px;">Showing most recent 50 entries. ${hiddenCount} older entries hidden.</p>` : ''}
                 ${timelineEntries.join('')}
             </div>
         </div>
@@ -6532,8 +6690,12 @@ function showLoadingModal(username) {
     overlay.className = 'age-modal-overlay';
     overlay.dataset.modalId = modalId;
 
+    const wrapper = document.createElement('div');
+    wrapper.className = 'av-ui-root';
+
     const modal = document.createElement('div');
     modal.className = 'age-modal';
+
     modal.dataset.modalId = modalId;
     modal.style.zIndex = ++zIndexCounter;
 
@@ -6548,7 +6710,8 @@ function showLoadingModal(username) {
 
     // Don't append overlay
     // document.body.appendChild(overlay);
-    document.body.appendChild(modal);
+    wrapper.appendChild(modal);
+    document.body.appendChild(wrapper);
 
     makeDraggable(modal);
     modal.addEventListener('mousedown', (e) => {
@@ -6629,6 +6792,9 @@ function createAgeCheckButton(username) {
         return null; // Don't create button for ignored users
     }
 
+    const wrapper = document.createElement('span');
+    wrapper.className = 'av-ui-root';
+
     const button = document.createElement('button');
     button.className = 'age-check-button';
     button.dataset.username = username;
@@ -6644,7 +6810,8 @@ function createAgeCheckButton(username) {
 
     button.onclick = () => handleAgeCheck(username);
 
-    return button;
+    wrapper.appendChild(button);
+    return wrapper;
 }
 
 function updateButtonForUser(username) {
