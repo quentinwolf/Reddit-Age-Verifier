@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.44
+// @version      1.45
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -295,14 +295,19 @@ GM_addStyle(`
 
     @layer av-ui {
         @scope (.av-ui-root) {
-            /* Hard reset to escape external styling */
+            /* Selective reset to escape external styling */
             :scope, :scope * {
-                all: revert !important;
                 box-sizing: border-box !important;
+                /* Reset only properties commonly affected by dark mode extensions */
+                color: inherit !important;
+                background: inherit !important;
+                border-color: inherit !important;
             }
 
             /* Re-establish baseline */
             :scope {
+                color: var(--av-text) !important;
+                background-color: var(--av-background) !important;
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif !important;
                 font-size: 14px !important;
                 line-height: 1.4 !important;
@@ -335,23 +340,23 @@ GM_addStyle(`
             }
 
             .age-modal {
-                position: fixed;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                background-color: var(--av-background);
-                color: var(--av-text);
-                border: 2px solid var(--av-border);
-                border-radius: 8px;
-                padding: 0;
-                z-index: 10000;
-                min-width: 400px;
-                min-height: 300px;
-                max-width: 95vw;
-                max-height: 95vh;  /* <-- Increased to 95% */
-                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.5);
-                display: flex;
-                flex-direction: column;
+                position: fixed !important;
+                top: 50% !important;
+                left: 50% !important;
+                transform: translate(-50%, -50%) !important;
+                background-color: var(--av-background) !important;
+                color: var(--av-text) !important;
+                border: 2px solid var(--av-border) !important;
+                border-radius: 8px !important;
+                padding: 0 !important;
+                z-index: 10000 !important;
+                min-width: 400px !important;
+                min-height: 300px !important;
+                max-width: 95vw !important;
+                max-height: 95vh !important;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.5) !important;
+                display: flex !important;
+                flex-direction: column !important;
             }
 
             .age-modal-overlay {
@@ -366,13 +371,13 @@ GM_addStyle(`
             }
 
             .age-modal-header {
-                display: flex;
-                flex-direction: column;
-                gap: 12px;
-                padding: 15px 20px;
-                border-bottom: 1px solid var(--av-border);
-                user-select: none;
-                flex-shrink: 0;
+                display: flex !important;
+                flex-direction: column !important;
+                gap: 12px !important;
+                padding: 15px 20px !important;
+                border-bottom: 1px solid var(--av-border) !important;
+                user-select: none !important;
+                flex-shrink: 0 !important;
             }
 
             .age-modal-title-row {
@@ -391,16 +396,16 @@ GM_addStyle(`
             }
 
             .age-modal-close {
-                background: none;
-                border: none;
-                color: var(--av-text-muted);
-                font-size: 24px;
-                cursor: pointer;
-                padding: 0;
-                width: 30px;
-                height: 30px;
-                line-height: 30px;
-                text-align: center;
+                background: none !important;
+                border: none !important;
+                color: var(--av-text-muted) !important;
+                font-size: 24px !important;
+                cursor: pointer !important;
+                padding: 0 !important;
+                width: 30px !important;
+                height: 30px !important;
+                line-height: 30px !important;
+                text-align: center !important;
             }
 
             .age-modal-close:hover {
@@ -408,10 +413,10 @@ GM_addStyle(`
             }
 
             .age-modal-content {
-                padding: 20px;
-                overflow-y: auto;
-                flex: 1;
-                min-height: 0;
+                padding: 20px !important;
+                overflow-y: auto !important;
+                flex: 1 !important;
+                min-height: 0 !important;
             }
 
             .age-modal-topbar {
@@ -436,34 +441,34 @@ GM_addStyle(`
             }
 
             .age-modal-button {
-                padding: 8px 16px;
-                background-color: var(--av-primary);
-                color: white;
-                border: none;
-                border-radius: 4px;
-                cursor: pointer;
-                font-weight: bold;
-                margin-right: 10px;
+                padding: 8px 16px !important;
+                background-color: var(--av-primary) !important;
+                color: white !important;
+                border: none !important;
+                border-radius: 4px !important;
+                cursor: pointer !important;
+                font-weight: bold !important;
+                margin-right: 10px !important;
             }
 
             .age-modal-button:hover {
-                background-color: #005ba1;
+                background-color: #005ba1 !important;
             }
 
             .age-modal-button.secondary {
-                background-color: var(--av-border);
+                background-color: var(--av-border) !important;
             }
 
             .age-modal-button.secondary:hover {
-                background-color: #4a4a4b;
+                background-color: #4a4a4b !important;
             }
 
             .age-modal-button.danger {
-                background-color: var(--av-danger);
+                background-color: var(--av-danger) !important;
             }
 
             .age-modal-button.danger:hover {
-                background-color: #c20022;
+                background-color: #c20022 !important;
             }
 
             .age-summary {
@@ -1613,6 +1618,9 @@ function showTokenModal(pendingUsername = null) {
         GM_setValue('pendingAgeCheck', pendingUsername);
     }
 
+    const wrapper = document.createElement('div');
+    wrapper.className = 'av-ui-root';
+
     const overlay = document.createElement('div');
     overlay.className = 'age-modal-overlay';
 
@@ -1647,8 +1655,8 @@ function showTokenModal(pendingUsername = null) {
         </div>
     `;
 
-    document.body.appendChild(overlay);
-    document.body.appendChild(modal);
+    wrapper.appendChild(modal);
+    document.body.appendChild(wrapper);
 
     tokenModal = { modal, overlay };
 
@@ -1677,8 +1685,7 @@ function showTokenModal(pendingUsername = null) {
     modalContent.appendChild(autoFetchBtn);
 
     const closeModal = () => {
-        document.body.removeChild(overlay);
-        document.body.removeChild(modal);
+        document.body.removeChild(wrapper);
         tokenModal = null;
     };
 
@@ -1748,8 +1755,12 @@ function showTokenModal(pendingUsername = null) {
 function showSettingsModal() {
     const modalId = `age-modal-${modalCounter++}`;
 
+    const wrapper = document.createElement('div');
+    wrapper.className = 'av-ui-root';
+
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
+
     modal.dataset.modalId = modalId;
     modal.style.minWidth = '500px';
     modal.style.width = '500px';
@@ -2131,7 +2142,8 @@ function showSettingsModal() {
         </div>
     `;
 
-    document.body.appendChild(modal);
+    wrapper.appendChild(modal);
+    document.body.appendChild(wrapper);
 
     makeDraggable(modal);
     modal.addEventListener('mousedown', () => {
@@ -2152,7 +2164,7 @@ function showSettingsModal() {
     const addUsersBtn = modal.querySelector('#add-ignored-users');
 
     const closeModal = () => {
-        document.body.removeChild(modal);
+        document.body.removeChild(wrapper);
         resultsModals = resultsModals.filter(m => m.modalId !== modalId);
     };
 
@@ -4559,8 +4571,12 @@ function escapeRegExp(string) {
 function showManualSearchModal(prefillAuthor = null) {
     const modalId = `age-modal-${modalCounter++}`;
 
+    const wrapper = document.createElement('div');
+    wrapper.className = 'av-ui-root';
+
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
+
     modal.dataset.modalId = modalId;
     modal.style.width = '700px';
     modal.style.height = '600px';
@@ -4648,7 +4664,8 @@ function showManualSearchModal(prefillAuthor = null) {
         </div>
     `;
 
-    document.body.appendChild(modal);
+    wrapper.appendChild(modal);
+    document.body.appendChild(wrapper);
 
     makeDraggable(modal);
     modal.addEventListener('mousedown', () => {
@@ -4664,7 +4681,7 @@ function showManualSearchModal(prefillAuthor = null) {
     const form = modal.querySelector('#manual-search-form');
 
     const closeModal = () => {
-        document.body.removeChild(modal);
+        document.body.removeChild(wrapper);
         resultsModals = resultsModals.filter(m => m.modalId !== modalId);
     };
 
@@ -4724,8 +4741,12 @@ function showManualSearchResults(searchData) {
     const { results, params } = searchData;
     const modalId = `age-modal-${modalCounter++}`;
 
+    const wrapper = document.createElement('div');
+    wrapper.className = 'av-ui-root';
+
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
+
     modal.dataset.modalId = modalId;
     modal.style.width = `${userSettings.modalWidth}px`;
     modal.style.height = `${userSettings.modalHeight}px`;
@@ -4903,7 +4924,8 @@ function showManualSearchResults(searchData) {
         </div>
     `;
 
-    document.body.appendChild(modal);
+    wrapper.appendChild(modal);
+    document.body.appendChild(wrapper);
 
     makeDraggable(modal);
     modal.addEventListener('mousedown', () => {
@@ -4919,7 +4941,7 @@ function showManualSearchResults(searchData) {
     const form = modal.querySelector('#manual-search-form-results');
 
     const closeModal = () => {
-        document.body.removeChild(modal);
+        document.body.removeChild(wrapper);
         resultsModals = resultsModals.filter(m => m.modalId !== modalId);
     };
 
@@ -4985,8 +5007,12 @@ function showResultsModal(username, ageData) {
     overlay.className = 'age-modal-overlay';
     overlay.dataset.modalId = modalId;
 
+    const wrapper = document.createElement('div');
+    wrapper.className = 'av-ui-root';
+
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
+
     modal.dataset.modalId = modalId;
     modal.style.minWidth = '600px';
     modal.style.width = `${userSettings.modalWidth}px`;
@@ -5209,7 +5235,8 @@ function showResultsModal(username, ageData) {
 
     // Don't append overlay - we don't want darkening with multiple modals
     // document.body.appendChild(overlay);
-    document.body.appendChild(modal);
+    wrapper.appendChild(modal);
+    document.body.appendChild(wrapper);
 
     // Make modal draggable
     makeDraggable(modal);
@@ -5255,10 +5282,7 @@ function showResultsModal(username, ageData) {
     let activeFilter = null;
 
     const closeModal = () => {
-        // Don't try to remove overlay since we didn't append it
-        // document.body.removeChild(overlay);
-        document.body.removeChild(modal);
-        // Remove from tracking array
+        document.body.removeChild(wrapper);
         resultsModals = resultsModals.filter(m => m.modalId !== modalId);
     };
 
@@ -5759,8 +5783,12 @@ function showDeepAnalysisModal(username, ageData, analysis) {
 
     const modalId = `age-modal-${modalCounter++}`;
 
+    const wrapper = document.createElement('div');
+    wrapper.className = 'av-ui-root';
+
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
+
     modal.dataset.modalId = modalId;
     modal.style.minWidth = '700px';
     modal.style.width = '900px';
@@ -5813,7 +5841,8 @@ function showDeepAnalysisModal(username, ageData, analysis) {
         </div>
     `;
 
-    document.body.appendChild(modal);
+    wrapper.appendChild(modal);
+    document.body.appendChild(wrapper);
 
     makeDraggable(modal);
     modal.addEventListener('mousedown', () => {
@@ -5833,7 +5862,7 @@ function showDeepAnalysisModal(username, ageData, analysis) {
     const fetchMoreBtn = modal.querySelector('#fetch-more-data');
 
     const closeModal = () => {
-        document.body.removeChild(modal);
+        document.body.removeChild(wrapper);
         resultsModals = resultsModals.filter(m => m.modalId !== modalId);
     };
 
