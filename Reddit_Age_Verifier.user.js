@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.42
+// @version      1.43
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -802,6 +802,24 @@ GM_addStyle(`
     .deep-analysis-toggle {
         color: #818384;
         font-size: 12px;
+    }
+
+    .deep-analysis-copy {
+        background: none;
+        border: none;
+        color: #818384;
+        font-size: 16px;
+        cursor: pointer;
+        padding: 0 8px;
+        transition: color 0.2s;
+    }
+
+    .deep-analysis-copy:hover {
+        color: #d7dadc;
+    }
+
+    .deep-analysis-copy.copied {
+        color: #46d160;
     }
 
     .deep-analysis-content {
@@ -5412,6 +5430,171 @@ function showErrorModal(username, error) {
     closeButton.onclick = closeModal;
 }
 
+function copyDeepAnalysisSectionAsMarkdown(sectionType, analysis, username) {
+    let markdown = '';
+
+    switch (sectionType) {
+        case 'overview':
+            markdown += `## Overview - u/${username}\n\n`;
+            markdown += `- **Posts with Age Mentions:** ${analysis.totalPosts}\n`;
+            markdown += `- **Posted Ages:** ${analysis.postedAges.length > 0 ? analysis.postedAges.join(', ') : 'None'}\n`;
+            markdown += `- **Possible Ages:** ${analysis.possibleAges.length > 0 ? analysis.possibleAges.join(', ') : 'None'}\n`;
+            if (analysis.ageExtremes) {
+                markdown += `- **Age Range:** ${analysis.ageExtremes.min} - ${analysis.ageExtremes.max} (spread: ${analysis.ageExtremes.spread})\n`;
+                markdown += `- **Mean Age / Std Dev:** ${analysis.ageExtremes.mean} / ±${analysis.ageExtremes.stdDev}\n`;
+            }
+            markdown += `- **Consistency Score:** ${analysis.consistencyScore}/100\n`;
+            if (analysis.recentAgeChange) {
+                const rc = analysis.recentAgeChange;
+                markdown += `- **Recent Age Change:** ${rc.fromAge} → ${rc.toAge} (${rc.daysAgo} days ago)\n`;
+            }
+            if (analysis.couplesAnalysis && analysis.couplesAnalysis.isCouplesAccount) {
+                markdown += `- **Account Type:** Likely Couples/Shared Account (${analysis.couplesAnalysis.confidence} confidence)\n`;
+            }
+            break;
+
+        case 'anomalies':
+            markdown += `## Anomalies & Age Inconsistencies - u/${username}\n\n`;
+            if (analysis.backwardsAging.length === 0 && (!analysis.staleAges || analysis.staleAges.length === 0)) {
+                markdown += '✓ No age anomalies detected.\n';
+            } else {
+                if (analysis.backwardsAging.length > 0) {
+                    markdown += `### Backwards Aging (${analysis.backwardsAging.length} instances)\n\n`;
+                    analysis.backwardsAging.forEach(a => {
+                        markdown += `- Age dropped from **${a.fromAge}** to **${a.toAge}** (${a.ageDrop} years younger)\n`;
+                        markdown += `  - ${a.fromDate} (r/${a.fromSubreddit}) → ${a.toDate} (r/${a.toSubreddit})\n`;
+                        markdown += `  - ${a.daysBetween} days between posts\n`;
+                        markdown += `  - [View Post](${a.permalink})\n\n`;
+                    });
+                }
+                if (analysis.staleAges && analysis.staleAges.length > 0) {
+                    markdown += `### Stale Age Detection (${analysis.staleAges.length} instances)\n\n`;
+                    analysis.staleAges.forEach(s => {
+                        markdown += `- **${s.severity} Severity:** Posted as age **${s.age}** for ${s.monthsSpan} months (${s.postCount} posts)\n`;
+                        markdown += `  - First: ${s.firstDate} (r/${s.firstSubreddit}) - [View](${s.firstPermalink})\n`;
+                        markdown += `  - Last: ${s.lastDate} (r/${s.lastSubreddit}) - [View](${s.lastPermalink})\n\n`;
+                    });
+                }
+            }
+            break;
+
+        case 'subreddit':
+            markdown += `## Subreddit Age Comparison - u/${username}\n\n`;
+            const comparison = analysis.subredditComparison;
+            const trackedSubs = userSettings.trackedSubreddits || [];
+
+            if (trackedSubs.length === 0) {
+                markdown += 'No tracked subreddits configured.\n';
+            } else {
+                if (comparison.ageDiscrepancy) {
+                    markdown += '⚠️ **Age Discrepancy Detected**\n\n';
+                    if (comparison.onlyOlderOnTracked) {
+                        markdown += `User posts **older ages** on tracked subreddits!\n`;
+                        markdown += `- Tracked: ${comparison.trackedAgeRange.ages.join(', ')}\n`;
+                        markdown += `- Other: ${comparison.otherAgeRange.ages.join(', ')}\n\n`;
+                    } else if (comparison.onlyYoungerOnTracked) {
+                        markdown += `User posts **younger ages** on tracked subreddits.\n`;
+                        markdown += `- Tracked: ${comparison.trackedAgeRange.ages.join(', ')}\n`;
+                        markdown += `- Other: ${comparison.otherAgeRange.ages.join(', ')}\n\n`;
+                    } else {
+                        markdown += 'Age discrepancy detected between tracked and other subreddits.\n\n';
+                    }
+                }
+
+                markdown += '| Category | Ages Posted | Post Count | Subreddits |\n';
+                markdown += '|----------|-------------|------------|------------|\n';
+                markdown += `| Your Tracked Subs | ${comparison.trackedAgeRange ? comparison.trackedAgeRange.ages.join(', ') : 'N/A'} | ${comparison.tracked.posts.length} | ${Array.from(comparison.tracked.subreddits).map(s => `r/${s}`).join(', ') || 'None'} |\n`;
+                markdown += `| Other Subreddits | ${comparison.otherAgeRange ? comparison.otherAgeRange.ages.join(', ') : 'N/A'} | ${comparison.other.posts.length} | ${Array.from(comparison.other.subreddits).slice(0, 5).map(s => `r/${s}`).join(', ')}${comparison.other.subreddits.size > 5 ? '...' : ''} |\n`;
+            }
+            break;
+
+        case 'birthday':
+            markdown += `## Birthday Estimate - u/${username}\n\n`;
+            const birthday = analysis.birthdayEstimate;
+            if (!birthday || birthday.confidence === 'None') {
+                markdown += birthday && birthday.reason ? birthday.reason : 'Unable to estimate birthday from available data.\n';
+            } else {
+                markdown += `- **Estimated Birthday:** ${birthday.range}\n`;
+                markdown += `- **Confidence:** ${birthday.confidence}\n`;
+                if (birthday.transitionCount) {
+                    markdown += `- **Based on:** ${birthday.transitionCount} age transition${birthday.transitionCount > 1 ? 's' : ''}\n`;
+                }
+                if (birthday.dayRange && birthday.dayRange.transitionsUsed) {
+                    markdown += `- **Day Precision:** ${birthday.dayRange.transitionsUsed} transition${birthday.dayRange.transitionsUsed > 1 ? 's' : ''} used\n`;
+                }
+            }
+            break;
+
+        case 'couples':
+            markdown += `## Couples Account Detection - u/${username}\n\n`;
+            const couples = analysis.couplesAnalysis;
+            if (!couples || !couples.isCouplesAccount) {
+                markdown += '✓ No couples/shared account pattern detected.\n';
+            } else {
+                markdown += `⚠️ **Likely Couples/Shared Account** (${couples.confidence} Confidence)\n\n`;
+                markdown += `- **Detection Method:** ${couples.detectionMethod || 'Multiple signals'}\n`;
+
+                const track1Avg = couples.tracks[0] ? (couples.tracks[0].ageRange.min + couples.tracks[0].ageRange.max) / 2 : 0;
+                const track2Avg = couples.tracks[1] ? (couples.tracks[1].ageRange.min + couples.tracks[1].ageRange.max) / 2 : 0;
+                const avgGap = Math.abs(track1Avg - track2Avg);
+
+                markdown += `- **Average Age Gap:** ${avgGap.toFixed(0)} years\n`;
+                markdown += `- **Gap Consistency:** ${(couples.ageGapConsistency * 100).toFixed(0)}%\n`;
+                markdown += `- **Post Interleaving:** ${(couples.interleaveRatio * 100).toFixed(0)}%\n\n`;
+
+                couples.tracks.forEach(track => {
+                    markdown += `### ${track.name}\n`;
+                    markdown += `- Age Range: ${track.ageRange.min} - ${track.ageRange.max}\n`;
+                    markdown += `- Estimated Current Age: ${track.currentAgeEstimate ? `~${track.currentAgeEstimate}` : 'Unknown'}\n`;
+                    if (track.birthdayEstimate && track.birthdayEstimate.confidence !== 'None') {
+                        markdown += `- Birthday: ${track.birthdayEstimate.range} (${track.birthdayEstimate.confidence})\n`;
+                    }
+                    markdown += `- Post Count: ${track.postCount}\n\n`;
+                });
+            }
+            break;
+
+        case 'timeline':
+            markdown += `## Age Timeline - u/${username}\n\n`;
+            if (analysis.timeline.length === 0) {
+                markdown += 'No timeline data available.\n';
+            } else {
+                const displayTimeline = analysis.timeline.slice(-50);
+                markdown += '| Date | Age | Subreddit | Change |\n';
+                markdown += '|------|-----|-----------|--------|\n';
+
+                let prevAge = null;
+                displayTimeline.forEach((point, idx) => {
+                    const date = new Date(point.timestamp * 1000).toLocaleDateString('en-US', {
+                        year: 'numeric', month: 'short', day: 'numeric'
+                    });
+                    let changeText = '';
+
+                    if (idx === 0 || prevAge === null) {
+                        changeText = '(First)';
+                    } else if (point.age > prevAge) {
+                        changeText = `+${point.age - prevAge}`;
+                    } else if (point.age < prevAge) {
+                        changeText = `⚠️ ${point.age - prevAge}`;
+                    } else {
+                        changeText = '—';
+                    }
+
+                    markdown += `| ${date} | ${point.age} | r/${point.subreddit} | ${changeText} |\n`;
+                    prevAge = point.age;
+                });
+
+                const hiddenCount = analysis.timeline.length - displayTimeline.length;
+                if (hiddenCount > 0) {
+                    markdown += `\n*Showing most recent 50 entries. ${hiddenCount} older entries hidden.*\n`;
+                }
+            }
+            break;
+    }
+
+    return markdown;
+}
+
 function showDeepAnalysisModal(username, ageData, analysis) {
     // Update button cache since we're displaying this data
     updateButtonCacheForUser(username, ageData);
@@ -5513,11 +5696,44 @@ function showDeepAnalysisModal(username, ageData, analysis) {
 
     // Collapsible sections
     modal.querySelectorAll('.deep-analysis-header').forEach(header => {
-        header.addEventListener('click', () => {
+        header.addEventListener('click', (e) => {
+            // Don't toggle if clicking the copy button
+            if (e.target.classList.contains('deep-analysis-copy')) {
+                return;
+            }
             const content = header.nextElementSibling;
             const toggle = header.querySelector('.deep-analysis-toggle');
             content.classList.toggle('collapsed');
             toggle.textContent = content.classList.contains('collapsed') ? '▶ Show' : '▼ Hide';
+        });
+    });
+
+    // Copy buttons
+    modal.querySelectorAll('.deep-analysis-copy').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation(); // Prevent header toggle
+            const sectionType = btn.dataset.section;
+            const markdown = copyDeepAnalysisSectionAsMarkdown(sectionType, analysis, username);
+
+            try {
+                await navigator.clipboard.writeText(markdown);
+
+                // Visual feedback
+                const originalText = btn.textContent;
+                btn.textContent = '✓';
+                btn.classList.add('copied');
+
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                    btn.classList.remove('copied');
+                }, 1500);
+            } catch (err) {
+                console.error('Copy failed:', err);
+                btn.textContent = '✗';
+                setTimeout(() => {
+                    btn.textContent = '📋';
+                }, 1500);
+            }
         });
     });
 
@@ -5793,7 +6009,10 @@ function buildOverviewSection(analysis) {
         <div class="deep-analysis-section">
             <div class="deep-analysis-header">
                 <span class="deep-analysis-title">📊 Overview</span>
-                <span class="deep-analysis-toggle">▼ Hide</span>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <button class="deep-analysis-copy" data-section="overview" title="Copy as Markdown">📋</button>
+                    <span class="deep-analysis-toggle">▼ Hide</span>
+                </div>
             </div>
             <div class="deep-analysis-content">
                 <div class="analysis-stat-row">
@@ -5839,7 +6058,10 @@ function buildAnomaliesSection(analysis) {
             <div class="deep-analysis-section">
                 <div class="deep-analysis-header">
                     <span class="deep-analysis-title">⚠️ Anomalies & Age Inconsistencies</span>
-                    <span class="deep-analysis-toggle">▼ Hide</span>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <button class="deep-analysis-copy" data-section="anomalies" title="Copy as Markdown">📋</button>
+                        <span class="deep-analysis-toggle">▼ Hide</span>
+                    </div>
                 </div>
                 <div class="deep-analysis-content">
                     <p style="color: #46d160;">✓ No age anomalies detected. User ages normally over time.</p>
@@ -5938,7 +6160,10 @@ function buildSubredditSection(analysis) {
             <div class="deep-analysis-section">
                 <div class="deep-analysis-header">
                     <span class="deep-analysis-title">🔍 Subreddit Age Comparison</span>
-                    <span class="deep-analysis-toggle">▼ Hide</span>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <button class="deep-analysis-copy" data-section="subreddit" title="Copy as Markdown">📋</button>
+                        <span class="deep-analysis-toggle">▼ Hide</span>
+                    </div>
                 </div>
                 <div class="deep-analysis-content">
                     <p style="color: #818384;">No tracked subreddits configured. Add subreddits in Settings to compare age behavior.</p>
@@ -5973,7 +6198,10 @@ function buildSubredditSection(analysis) {
         <div class="deep-analysis-section">
             <div class="deep-analysis-header">
                 <span class="deep-analysis-title">🔍 Subreddit Age Comparison</span>
-                <span class="deep-analysis-toggle">▼ Hide</span>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <button class="deep-analysis-copy" data-section="subreddit" title="Copy as Markdown">📋</button>
+                    <span class="deep-analysis-toggle">▼ Hide</span>
+                </div>
             </div>
             <div class="deep-analysis-content">
                 ${warningHTML}
@@ -6010,7 +6238,10 @@ function buildBirthdaySection(analysis) {
             <div class="deep-analysis-section">
                 <div class="deep-analysis-header">
                     <span class="deep-analysis-title">🎂 Birthday Estimate</span>
-                    <span class="deep-analysis-toggle">▼ Hide</span>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <button class="deep-analysis-copy" data-section="birthday" title="Copy as Markdown">📋</button>
+                        <span class="deep-analysis-toggle">▼ Hide</span>
+                    </div>
                 </div>
                 <div class="deep-analysis-content">
                     <p style="color: #818384;">
@@ -6065,7 +6296,10 @@ function buildCouplesSection(analysis) {
             <div class="deep-analysis-section">
                 <div class="deep-analysis-header">
                     <span class="deep-analysis-title">👥 Couples Account Detection</span>
-                    <span class="deep-analysis-toggle">▼ Hide</span>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <button class="deep-analysis-copy" data-section="couples" title="Copy as Markdown">📋</button>
+                        <span class="deep-analysis-toggle">▼ Hide</span>
+                    </div>
                 </div>
                 <div class="deep-analysis-content">
                     <p style="color: #46d160;">✓ No couples/shared account pattern detected.</p>
@@ -6228,7 +6462,10 @@ function buildTimelineSection(analysis) {
         <div class="deep-analysis-section">
             <div class="deep-analysis-header">
                 <span class="deep-analysis-title">📅 Age Timeline (${analysis.timeline.length} entries)</span>
-                <span class="deep-analysis-toggle">▼ Hide</span>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <button class="deep-analysis-copy" data-section="timeline" title="Copy as Markdown">📋</button>
+                    <span class="deep-analysis-toggle">▼ Hide</span>
+                </div>
             </div>
             <div class="deep-analysis-content">
                 ${hiddenCount > 0 ? `<p style="color: #818384; margin-bottom: 10px; font-size: 12px;">Showing most recent 50 entries. ${hiddenCount} older entries hidden.</p>` : ''}
