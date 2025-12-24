@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.48
+// @version      1.49
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -111,7 +111,8 @@ const DEFAULT_SETTINGS = {
         auto_modmail: true,
     },
     customButtons: [
-        // Example: { id: 'clickme', label: 'Clickable Button', urlTemplate: 'https://someurl.here', enabled: true, style: 'danger' }
+        // Example: { id: 'clickme', label: 'Clickable Button', type: 'link', urlTemplate: 'https://someurl.here', enabled: true, style: 'danger' }
+        // Example: { id: 'verify', label: 'Verification', type: 'template', textTemplate: 'Your text here with {{author}}', enabled: true, style: 'primary' }
     ]
 };
 
@@ -2152,7 +2153,7 @@ function showSettingsModal() {
 
                 <div id="custom-buttons-list">
                     ${userSettings.customButtons.map((btn, idx) => `
-                        <div class="custom-button-editor" data-index="${idx}" draggable="true" style="background-color: var(--av-surface); padding: 12px; border-radius: 4px; margin-bottom: 10px;">
+                        <div class="custom-button-editor" data-index="${idx}" style="background-color: var(--av-surface); padding: 12px; border-radius: 4px; margin-bottom: 10px;">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                                 <span class="custom-button-drag-handle" title="Drag to reorder">⋮⋮</span>
                                 <button class="age-modal-button danger" style="margin: 0; padding: 4px 12px; font-size: 12px;"
@@ -2169,9 +2170,21 @@ function showSettingsModal() {
                                        value="${escapeHtml(btn.label)}" style="width: 200px;">
                             </div>
                             <div class="age-settings-row">
+                                <label class="age-settings-label">Type:</label>
+                                <select class="age-settings-input custom-btn-type" style="width: 150px;">
+                                    <option value="link" ${btn.type === 'link' || !btn.type ? 'selected' : ''}>Link (opens URL)</option>
+                                    <option value="template" ${btn.type === 'template' ? 'selected' : ''}>Text Template (copy)</option>
+                                </select>
+                            </div>
+                            <div class="age-settings-row custom-btn-url-row" style="display: ${btn.type === 'template' ? 'none' : 'flex'};">
                                 <label class="age-settings-label">URL Template:</label>
                                 <input type="text" class="age-settings-input custom-btn-url"
-                                       value="${escapeHtml(btn.urlTemplate)}" style="width: 400px; font-family: monospace; font-size: 11px;">
+                                       value="${escapeHtml(btn.urlTemplate || '')}" style="width: 400px; font-family: monospace; font-size: 11px;">
+                            </div>
+                            <div class="age-settings-row custom-btn-template-row" style="display: ${btn.type === 'template' ? 'flex' : 'none'}; align-items: flex-start;">
+                                <label class="age-settings-label">Text Template:</label>
+                                <textarea class="age-settings-input custom-btn-template"
+                                          style="width: 400px; min-height: 120px; font-family: monospace; font-size: 11px; resize: vertical;">${escapeHtml(btn.textTemplate || '')}</textarea>
                             </div>
                             <div class="age-settings-row">
                                 <label class="age-settings-label">Button Style:</label>
@@ -2306,10 +2319,13 @@ function showSettingsModal() {
 
         // Collect custom buttons
         modal.querySelectorAll('.custom-button-editor').forEach((editor, idx) => {
+            const btnType = editor.querySelector('.custom-btn-type').value;
             newSettings.customButtons.push({
                 id: `custom_btn_${Date.now()}_${idx}`,
                 label: editor.querySelector('.custom-btn-label').value,
-                urlTemplate: editor.querySelector('.custom-btn-url').value,
+                type: btnType,
+                urlTemplate: btnType === 'link' ? editor.querySelector('.custom-btn-url').value : '',
+                textTemplate: btnType === 'template' ? editor.querySelector('.custom-btn-template').value : '',
                 enabled: editor.querySelector('.custom-btn-enabled').checked,
                 style: editor.querySelector('.custom-btn-style').value
             });
@@ -2417,7 +2433,7 @@ function showSettingsModal() {
             const newIndex = modal.querySelectorAll('.custom-button-editor').length;
 
             const newButtonHTML = `
-                <div class="custom-button-editor" data-index="${newIndex}" draggable="true" style="background-color: var(--av-surface); padding: 12px; border-radius: 4px; margin-bottom: 10px;">
+                <div class="custom-button-editor" data-index="${newIndex}" style="background-color: var(--av-surface); padding: 12px; border-radius: 4px; margin-bottom: 10px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                         <span class="custom-button-drag-handle" title="Drag to reorder">⋮⋮</span>
                         <button class="age-modal-button danger" style="margin: 0; padding: 4px 12px; font-size: 12px;"
@@ -2434,9 +2450,21 @@ function showSettingsModal() {
                                value="New Button" style="width: 200px;">
                     </div>
                     <div class="age-settings-row">
+                        <label class="age-settings-label">Type:</label>
+                        <select class="age-settings-input custom-btn-type" style="width: 150px;">
+                            <option value="link" selected>Link (opens URL)</option>
+                            <option value="template">Text Template (copy)</option>
+                        </select>
+                    </div>
+                    <div class="age-settings-row custom-btn-url-row">
                         <label class="age-settings-label">URL Template:</label>
                         <input type="text" class="age-settings-input custom-btn-url"
                                value="https://example.com/{{author}}" style="width: 400px; font-family: monospace; font-size: 11px;">
+                    </div>
+                    <div class="age-settings-row custom-btn-template-row" style="display: none; align-items: flex-start;">
+                        <label class="age-settings-label">Text Template:</label>
+                        <textarea class="age-settings-input custom-btn-template"
+                                  style="width: 400px; min-height: 120px; font-family: monospace; font-size: 11px; resize: vertical;"></textarea>
                     </div>
                     <div class="age-settings-row">
                         <label class="age-settings-label">Button Style:</label>
@@ -2512,12 +2540,22 @@ function showSettingsModal() {
         });
     }
 
-// Drag and drop for custom buttons
+    // Drag and drop for custom buttons
     function setupDragAndDrop() {
         const buttonsList = modal.querySelector('#custom-buttons-list');
         if (!buttonsList) return;
 
         let draggedElement = null;
+
+        // Make only the drag handle trigger drag
+        modal.querySelectorAll('.custom-button-drag-handle').forEach(handle => {
+            handle.addEventListener('mousedown', (e) => {
+                const editor = handle.closest('.custom-button-editor');
+                if (editor) {
+                    editor.setAttribute('draggable', 'true');
+                }
+            });
+        });
 
         buttonsList.addEventListener('dragstart', (e) => {
             if (e.target.classList.contains('custom-button-editor')) {
@@ -2531,8 +2569,8 @@ function showSettingsModal() {
         buttonsList.addEventListener('dragend', (e) => {
             if (e.target.classList.contains('custom-button-editor')) {
                 e.target.classList.remove('dragging');
+                e.target.removeAttribute('draggable'); // Disable dragging after drop
             }
-            // Remove all drag-over classes
             buttonsList.querySelectorAll('.custom-button-editor').forEach(el => {
                 el.classList.remove('drag-over');
             });
@@ -2582,11 +2620,33 @@ function showSettingsModal() {
 
     setupDragAndDrop();
 
+    // Type selector change handler
+    function attachTypeChangeHandlers() {
+        modal.querySelectorAll('.custom-btn-type').forEach(select => {
+            select.addEventListener('change', function() {
+                const editor = this.closest('.custom-button-editor');
+                const urlRow = editor.querySelector('.custom-btn-url-row');
+                const templateRow = editor.querySelector('.custom-btn-template-row');
+
+                if (this.value === 'template') {
+                    urlRow.style.display = 'none';
+                    templateRow.style.display = 'flex';
+                } else {
+                    urlRow.style.display = 'flex';
+                    templateRow.style.display = 'none';
+                }
+            });
+        });
+    }
+
+    attachTypeChangeHandlers();
+
     // Re-setup drag and drop when adding new buttons
     const originalAddButtonHandler = addCustomButtonBtn.onclick;
     addCustomButtonBtn.onclick = () => {
         originalAddButtonHandler();
         setupDragAndDrop();
+        attachTypeChangeHandlers();
     };
 
     attachRemoveHandlers(modal);
@@ -6738,15 +6798,35 @@ function renderCustomButtons(username, ageData) {
     };
 
     const buttonsHTML = enabledButtons.map(btn => {
-        let url = btn.urlTemplate;
-        Object.keys(placeholders).forEach(key => {
-            url = url.replace(new RegExp(`{{${key}}}`, 'g'), placeholders[key]);
-        });
-
+        const btnType = btn.type || 'link'; // Default to link for backward compatibility
         const styleClass = btn.style || 'primary';
-        return `<button class="age-modal-button ${styleClass === 'primary' ? '' : styleClass}"
-                        data-custom-url="${escapeHtml(url)}"
-                        data-button-id="${btn.id}">${escapeHtml(btn.label)}</button>`;
+
+        if (btnType === 'template') {
+            // Text template button
+            let template = btn.textTemplate || '';
+            Object.keys(placeholders).forEach(key => {
+                template = template.replace(new RegExp(`{{${key}}}`, 'g'), placeholders[key]);
+            });
+
+            // Base64 encode the template to safely store in data attribute
+            const encodedTemplate = btoa(unescape(encodeURIComponent(template)));
+
+            return `<button class="age-modal-button ${styleClass === 'primary' ? '' : styleClass}"
+                            data-custom-template="${encodedTemplate}"
+                            data-button-id="${btn.id}"
+                            data-button-type="template">${escapeHtml(btn.label)}</button>`;
+        } else {
+            // Link button
+            let url = btn.urlTemplate || '';
+            Object.keys(placeholders).forEach(key => {
+                url = url.replace(new RegExp(`{{${key}}}`, 'g'), placeholders[key]);
+            });
+
+            return `<button class="age-modal-button ${styleClass === 'primary' ? '' : styleClass}"
+                            data-custom-url="${escapeHtml(url)}"
+                            data-button-id="${btn.id}"
+                            data-button-type="link">${escapeHtml(btn.label)}</button>`;
+        }
     }).join('');
 
     return `
@@ -6757,11 +6837,42 @@ function renderCustomButtons(username, ageData) {
 }
 
 function attachCustomButtonHandlers(modal) {
-    modal.querySelectorAll('[data-custom-url]').forEach(btn => {
-        btn.onclick = (e) => {
+    modal.querySelectorAll('[data-button-type]').forEach(btn => {
+        btn.onclick = async (e) => {
             e.preventDefault();
-            const url = btn.dataset.customUrl;
-            window.location.href = url;
+
+            const btnType = btn.dataset.buttonType;
+
+            if (btnType === 'template') {
+                // Copy template text to clipboard
+                // Decode base64 template
+                const encodedTemplate = btn.dataset.customTemplate;
+                const template = decodeURIComponent(escape(atob(encodedTemplate)));
+
+                try {
+                    await navigator.clipboard.writeText(template);
+
+                    // Visual feedback
+                    const originalText = btn.textContent;
+                    btn.textContent = '✓ Copied!';
+                    btn.style.backgroundColor = 'var(--av-success)';
+
+                    setTimeout(() => {
+                        btn.textContent = originalText;
+                        btn.style.backgroundColor = '';
+                    }, 1500);
+                } catch (err) {
+                    console.error('Copy failed:', err);
+                    btn.textContent = '✗ Failed';
+                    setTimeout(() => {
+                        btn.textContent = originalText;
+                    }, 1500);
+                }
+            } else {
+                // Open link in new window
+                const url = btn.dataset.customUrl;
+                window.open(url, '_blank');
+            }
         };
     });
 }
