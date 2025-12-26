@@ -25,12 +25,13 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.50
+// @version      1.51
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM_registerMenuCommand
 // ==/UserScript==
 
 // ============================================================================
@@ -1870,6 +1871,409 @@ function showTokenModal(pendingUsername = null) {
     }, 5 * 60 * 1000);
 
     input.focus();
+}
+
+function showIgnoredUsersModal() {
+    const modalId = `age-modal-${modalCounter++}`;
+
+    const modal = document.createElement('div');
+    modal.className = 'age-modal';
+    modal.dataset.modalId = modalId;
+    modal.style.minWidth = '500px';
+    modal.style.width = '650px';
+    modal.style.maxHeight = '700px';
+    modal.style.zIndex = ++zIndexCounter;
+
+    const ignoredList = userSettings.ignoredUsers;
+    const commonBots = Object.keys(userSettings.commonBots).filter(bot => userSettings.commonBots[bot]);
+
+    let ignoredUsersHTML = '';
+    if (ignoredList.length === 0) {
+        ignoredUsersHTML = '<p style="color: var(--av-text-muted); text-align: center; padding: 20px;">No manually ignored users</p>';
+    } else {
+        ignoredUsersHTML = `<div class="age-ignored-users-list">
+            ${ignoredList.map(user => `
+                <div class="age-ignored-user-item">
+                    <span class="age-ignored-user-name">u/${escapeHtml(user)}</span>
+                    <button class="age-ignored-user-remove" data-username="${escapeHtml(user)}">Remove</button>
+                </div>
+            `).join('')}
+        </div>`;
+    }
+
+    let botsHTML = '';
+    if (commonBots.length > 0) {
+        botsHTML = `
+            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--av-border);">
+                <div style="font-weight: bold; margin-bottom: 10px; color: var(--av-text);">Common Bots (from settings)</div>
+                <div style="color: var(--av-text-muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 8px;">
+                    ${commonBots.map(bot => `<span style="background: var(--av-surface); padding: 4px 8px; border-radius: 3px;">${bot}</span>`).join('')}
+                </div>
+                <p style="color: var(--av-text-muted); font-size: 11px; margin-top: 8px;">Configure in Settings</p>
+            </div>
+        `;
+    }
+
+    modal.innerHTML = `
+        <div class="age-modal-header">
+            <div class="age-modal-title-row">
+                <div class="age-modal-title">Ignored Users (${ignoredList.length})</div>
+                <button class="age-modal-close">&times;</button>
+            </div>
+        </div>
+        <div class="age-modal-content">
+            <p style="color: var(--av-text-muted); margin-bottom: 15px;">
+                Users on this list won't have age check buttons. Click "Remove" to restore their buttons.
+            </p>
+
+            <div style="margin-bottom: 20px; padding: 15px; background-color: var(--av-surface); border-radius: 6px;">
+                <div style="font-weight: bold; margin-bottom: 10px; color: var(--av-text);">Add User to Ignore List</div>
+                <div style="display: flex; gap: 10px;">
+                    <input type="text" id="ignore-username-input" class="age-settings-input"
+                           placeholder="Enter username (without u/)"
+                           style="flex: 1; font-family: monospace;">
+                    <button class="age-modal-button" id="add-ignore-user-btn">Add User</button>
+                </div>
+            </div>
+
+            ${ignoredUsersHTML}
+            ${botsHTML}
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    makeDraggable(modal);
+    modal.addEventListener('mousedown', () => {
+        bringToFront(modal);
+        normalizeModalPosition(modal);
+    });
+
+    resultsModals.push({ modalId, modal, overlay: null, username: 'ignored-users' });
+
+    const closeBtn = modal.querySelector('.age-modal-close');
+    const closeButton = modal.querySelector('.age-modal-buttons .secondary');
+    const settingsBtn = modal.querySelector('#open-full-settings');
+
+    const closeModal = () => {
+        document.body.removeChild(modal);
+        resultsModals = resultsModals.filter(m => m.modalId !== modalId);
+    };
+
+    closeBtn.onclick = closeModal;
+    closeButton.onclick = closeModal;
+
+    settingsBtn.onclick = () => {
+        closeModal();
+        showSettingsModal();
+    };
+
+    // Add user handler
+    const addUserBtn = modal.querySelector('#add-ignore-user-btn');
+    const usernameInput = modal.querySelector('#ignore-username-input');
+
+    const addUser = () => {
+        const username = usernameInput.value.trim().replace(/^u\//, '');
+        if (!username) {
+            alert('Please enter a username');
+            return;
+        }
+
+        if (userSettings.ignoredUsers.some(u => u.toLowerCase() === username.toLowerCase())) {
+            alert(`u/${username} is already in the ignored list`);
+            usernameInput.value = '';
+            return;
+        }
+
+        // Add to list
+        userSettings.ignoredUsers.push(username);
+        saveSettings(userSettings);
+
+        // Remove buttons for this user
+        document.querySelectorAll(`.age-check-button[data-username="${username}"]`).forEach(btn => {
+            btn.remove();
+        });
+
+        // Add to modal display
+        const listContainer = modal.querySelector('.age-ignored-users-list');
+        if (!listContainer) {
+            // Create list if it doesn't exist
+            const emptyMsg = modal.querySelector('.age-modal-content p[style*="text-align: center"]');
+            if (emptyMsg) {
+                emptyMsg.remove();
+            }
+
+            const newList = document.createElement('div');
+            newList.className = 'age-ignored-users-list';
+            const botsSection = modal.querySelector('.age-modal-content > div[style*="border-top"]');
+            if (botsSection) {
+                botsSection.parentNode.insertBefore(newList, botsSection);
+            } else {
+                modal.querySelector('.age-modal-content').appendChild(newList);
+            }
+        }
+
+        const listContainer2 = modal.querySelector('.age-ignored-users-list');
+        const newItem = document.createElement('div');
+        newItem.className = 'age-ignored-user-item';
+        newItem.innerHTML = `
+            <span class="age-ignored-user-name">u/${escapeHtml(username)}</span>
+            <button class="age-ignored-user-remove" data-username="${escapeHtml(username)}">Remove</button>
+        `;
+        listContainer2.appendChild(newItem);
+
+        // Attach remove handler
+        newItem.querySelector('.age-ignored-user-remove').onclick = function() {
+            handleUnignoreUser(username);
+            newItem.remove();
+
+            const titleDiv = modal.querySelector('.age-modal-title');
+            titleDiv.textContent = `Ignored Users (${userSettings.ignoredUsers.length})`;
+
+            if (userSettings.ignoredUsers.length === 0) {
+                const list = modal.querySelector('.age-ignored-users-list');
+                if (list) {
+                    list.innerHTML = '<p style="color: var(--av-text-muted); text-align: center; padding: 20px;">No manually ignored users</p>';
+                }
+            }
+        };
+
+        // Update count
+        const titleDiv = modal.querySelector('.age-modal-title');
+        titleDiv.textContent = `Ignored Users (${userSettings.ignoredUsers.length})`;
+
+        // Clear input
+        usernameInput.value = '';
+
+        // Show notification
+        showNotificationBanner(`Added u/${username} to ignored users`, 2000);
+    };
+
+    addUserBtn.onclick = addUser;
+    usernameInput.onkeypress = (e) => {
+        if (e.key === 'Enter') {
+            addUser();
+        }
+    };
+
+    // Attach remove handlers
+    modal.querySelectorAll('.age-ignored-user-remove').forEach(btn => {
+        btn.onclick = () => {
+            const username = btn.dataset.username;
+            handleUnignoreUser(username);
+
+            // Update the modal
+            const userItem = btn.closest('.age-ignored-user-item');
+            userItem.remove();
+
+            // Update count in title
+            const titleDiv = modal.querySelector('.age-modal-title');
+            titleDiv.textContent = `Ignored Users (${userSettings.ignoredUsers.length})`;
+
+            // If no more users, show empty message
+            if (userSettings.ignoredUsers.length === 0) {
+                const listContainer = modal.querySelector('.age-ignored-users-list');
+                if (listContainer) {
+                    listContainer.innerHTML = '<p style="color: var(--av-text-muted); text-align: center; padding: 20px;">No manually ignored users</p>';
+                }
+            }
+        };
+    });
+}
+
+function showTrackedSubredditsModal() {
+    const modalId = `age-modal-${modalCounter++}`;
+
+    const modal = document.createElement('div');
+    modal.className = 'age-modal';
+    modal.dataset.modalId = modalId;
+    modal.style.minWidth = '500px';
+    modal.style.width = '650px';
+    modal.style.maxHeight = '700px';
+    modal.style.zIndex = ++zIndexCounter;
+
+    const trackedSubs = userSettings.trackedSubreddits || [];
+
+    let subsHTML = '';
+    if (trackedSubs.length === 0) {
+        subsHTML = '<p style="color: var(--av-text-muted); text-align: center; padding: 20px;">No tracked subreddits configured</p>';
+    } else {
+        subsHTML = `<div class="age-ignored-users-list">
+            ${trackedSubs.map(sub => `
+                <div class="age-ignored-user-item">
+                    <span class="age-ignored-user-name">r/${escapeHtml(sub)}</span>
+                    <button class="age-ignored-user-remove" data-subreddit="${escapeHtml(sub)}">Remove</button>
+                </div>
+            `).join('')}
+        </div>`;
+    }
+
+    modal.innerHTML = `
+        <div class="age-modal-header">
+            <div class="age-modal-title-row">
+                <div class="age-modal-title">Tracked Subreddits (${trackedSubs.length})</div>
+                <button class="age-modal-close">&times;</button>
+            </div>
+        </div>
+        <div class="age-modal-content">
+            <p style="color: var(--av-text-muted); margin-bottom: 15px;">
+                Tracked subreddits are used in Deep Analysis to compare if users post different ages on your subs vs elsewhere.
+            </p>
+
+            <div style="margin-bottom: 20px; padding: 15px; background-color: var(--av-surface); border-radius: 6px;">
+                <div style="font-weight: bold; margin-bottom: 10px; color: var(--av-text);">Add Subreddit to Track</div>
+                <div style="display: flex; gap: 10px;">
+                    <input type="text" id="track-subreddit-input" class="age-settings-input"
+                           placeholder="Enter subreddit name (with or without r/)"
+                           style="flex: 1; font-family: monospace;">
+                    <button class="age-modal-button" id="add-track-sub-btn">Add Subreddit</button>
+                </div>
+            </div>
+
+            ${subsHTML}
+        </div>
+        <div class="age-modal-buttons">
+            <button class="age-modal-button" id="open-full-settings-subs">Open Full Settings</button>
+            <button class="age-modal-button secondary">Close</button>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    makeDraggable(modal);
+    modal.addEventListener('mousedown', () => {
+        bringToFront(modal);
+        normalizeModalPosition(modal);
+    });
+
+    resultsModals.push({ modalId, modal, overlay: null, username: 'tracked-subreddits' });
+
+    const closeBtn = modal.querySelector('.age-modal-close');
+    const closeButton = modal.querySelector('.age-modal-buttons .secondary');
+    const settingsBtn = modal.querySelector('#open-full-settings-subs');
+
+    const closeModal = () => {
+        document.body.removeChild(modal);
+        resultsModals = resultsModals.filter(m => m.modalId !== modalId);
+    };
+
+    closeBtn.onclick = closeModal;
+    closeButton.onclick = closeModal;
+
+    settingsBtn.onclick = () => {
+        closeModal();
+        showSettingsModal();
+    };
+
+    // Add subreddit handler
+    const addSubBtn = modal.querySelector('#add-track-sub-btn');
+    const subInput = modal.querySelector('#track-subreddit-input');
+
+    const addSub = () => {
+        let subreddit = subInput.value.trim().replace(/^r\/|^\/r\//i, '').toLowerCase();
+        if (!subreddit) {
+            alert('Please enter a subreddit name');
+            return;
+        }
+
+        if (userSettings.trackedSubreddits.some(s => s.toLowerCase() === subreddit)) {
+            alert(`r/${subreddit} is already in the tracked list`);
+            subInput.value = '';
+            return;
+        }
+
+        // Add to list
+        userSettings.trackedSubreddits.push(subreddit);
+        saveSettings(userSettings);
+
+        // Add to modal display
+        const listContainer = modal.querySelector('.age-ignored-users-list');
+        if (!listContainer) {
+            // Create list if it doesn't exist
+            const emptyMsg = modal.querySelector('.age-modal-content p[style*="text-align: center"]');
+            if (emptyMsg) {
+                emptyMsg.remove();
+            }
+
+            const newList = document.createElement('div');
+            newList.className = 'age-ignored-users-list';
+            modal.querySelector('.age-modal-content').appendChild(newList);
+        }
+
+        const listContainer2 = modal.querySelector('.age-ignored-users-list');
+        const newItem = document.createElement('div');
+        newItem.className = 'age-ignored-user-item';
+        newItem.innerHTML = `
+            <span class="age-ignored-user-name">r/${escapeHtml(subreddit)}</span>
+            <button class="age-ignored-user-remove" data-subreddit="${escapeHtml(subreddit)}">Remove</button>
+        `;
+        listContainer2.appendChild(newItem);
+
+        // Attach remove handler
+        newItem.querySelector('.age-ignored-user-remove').onclick = function() {
+            const idx = userSettings.trackedSubreddits.findIndex(s => s.toLowerCase() === subreddit);
+            if (idx !== -1) {
+                userSettings.trackedSubreddits.splice(idx, 1);
+                saveSettings(userSettings);
+                showNotificationBanner(`Removed r/${subreddit} from tracked subreddits`, 2000);
+            }
+
+            newItem.remove();
+
+            const titleDiv = modal.querySelector('.age-modal-title');
+            titleDiv.textContent = `Tracked Subreddits (${userSettings.trackedSubreddits.length})`;
+
+            if (userSettings.trackedSubreddits.length === 0) {
+                const list = modal.querySelector('.age-ignored-users-list');
+                if (list) {
+                    list.innerHTML = '<p style="color: var(--av-text-muted); text-align: center; padding: 20px;">No tracked subreddits configured</p>';
+                }
+            }
+        };
+
+        // Update count
+        const titleDiv = modal.querySelector('.age-modal-title');
+        titleDiv.textContent = `Tracked Subreddits (${userSettings.trackedSubreddits.length})`;
+
+        // Clear input
+        subInput.value = '';
+
+        // Show notification
+        showNotificationBanner(`Added r/${subreddit} to tracked subreddits`, 2000);
+    };
+
+    addSubBtn.onclick = addSub;
+    subInput.onkeypress = (e) => {
+        if (e.key === 'Enter') {
+            addSub();
+        }
+    };
+
+    // Attach remove handlers for existing items
+    modal.querySelectorAll('.age-ignored-user-remove').forEach(btn => {
+        btn.onclick = () => {
+            const subreddit = btn.dataset.subreddit;
+            const idx = userSettings.trackedSubreddits.findIndex(s => s.toLowerCase() === subreddit.toLowerCase());
+            if (idx !== -1) {
+                userSettings.trackedSubreddits.splice(idx, 1);
+                saveSettings(userSettings);
+                showNotificationBanner(`Removed r/${subreddit} from tracked subreddits`, 2000);
+            }
+
+            const subItem = btn.closest('.age-ignored-user-item');
+            subItem.remove();
+
+            const titleDiv = modal.querySelector('.age-modal-title');
+            titleDiv.textContent = `Tracked Subreddits (${userSettings.trackedSubreddits.length})`;
+
+            if (userSettings.trackedSubreddits.length === 0) {
+                const listContainer = modal.querySelector('.age-ignored-users-list');
+                if (listContainer) {
+                    listContainer.innerHTML = '<p style="color: var(--av-text-muted); text-align: center; padding: 20px;">No tracked subreddits configured</p>';
+                }
+            }
+        };
+    });
 }
 
 function showSettingsModal() {
@@ -7020,17 +7424,17 @@ let activeContextMenu = null;
 
 function showContextMenu(event, username) {
     event.preventDefault();
-    
+
     // Close any existing context menu
     closeContextMenu();
-    
+
     const menu = document.createElement('div');
     menu.className = 'age-context-menu';
     menu.style.left = event.pageX + 'px';
     menu.style.top = event.pageY + 'px';
-    
+
     const cached = getCachedAgeData(username);
-    
+
     menu.innerHTML = `
         <div class="age-context-menu-item" data-action="manual-search">
             <span>🔍</span>
@@ -7051,10 +7455,10 @@ function showContextMenu(event, username) {
             <span>Settings</span>
         </div>
     `;
-    
+
     document.body.appendChild(menu);
     activeContextMenu = menu;
-    
+
     // Adjust position if menu would go off-screen
     const rect = menu.getBoundingClientRect();
     if (rect.right > window.innerWidth) {
@@ -7063,35 +7467,35 @@ function showContextMenu(event, username) {
     if (rect.bottom > window.innerHeight) {
         menu.style.top = (event.pageY - rect.height) + 'px';
     }
-    
+
     // Handle menu item clicks
     menu.querySelectorAll('.age-context-menu-item').forEach(item => {
         item.onclick = async (e) => {
             e.stopPropagation();
             const action = item.dataset.action;
-            
+
             closeContextMenu();
-            
+
             switch (action) {
                 case 'settings':
                     showSettingsModal();
                     break;
-                    
+
                 case 'manual-search':
                     showManualSearchModal(username);
                     break;
-                    
+
                 case 'deep-analysis':
                     await handleDeepAnalysisQuick(username);
                     break;
-                    
+
                 case 'ignore':
                     handleIgnoreUser(username);
                     break;
             }
         };
     });
-    
+
     // Close menu on click outside
     setTimeout(() => {
         document.addEventListener('click', closeContextMenu);
@@ -7110,7 +7514,7 @@ function closeContextMenu() {
 
 async function handleDeepAnalysisQuick(username) {
     const cached = getCachedAgeData(username);
-    
+
     if (cached) {
         // Already have data, go straight to deep analysis
         const analysis = performDeepAnalysis(cached, username);
@@ -7122,21 +7526,21 @@ async function handleDeepAnalysisQuick(username) {
             showTokenModal(username);
             return;
         }
-        
+
         const loadingModalId = showLoadingModal(username);
-        
+
         try {
             const results = await searchUserAges(username);
             const ageData = processResults(results, username);
-            
+
             // Cache the results
             setCachedAgeData(username, ageData);
             updateButtonCacheForUser(username, ageData);
             updateButtonForUser(username);
-            
+
             // Close loading modal
             closeModalById(loadingModalId);
-            
+
             // Go straight to deep analysis
             const analysis = performDeepAnalysis(ageData, username);
             showDeepAnalysisModal(username, ageData, analysis);
@@ -7144,7 +7548,7 @@ async function handleDeepAnalysisQuick(username) {
             console.error('Age check error:', error);
             closeModalById(loadingModalId);
             showErrorModal(username, error.message);
-            
+
             if (error.message.includes('token') || error.message.includes('Token')) {
                 setTimeout(() => {
                     showTokenModal(username);
@@ -7159,12 +7563,12 @@ function handleIgnoreUser(username) {
     if (!userSettings.ignoredUsers.includes(username)) {
         userSettings.ignoredUsers.push(username);
         saveSettings(userSettings);
-        
+
         // Remove all buttons for this user
         document.querySelectorAll(`.age-check-button[data-username="${username}"]`).forEach(btn => {
             btn.remove();
         });
-        
+
         // Show notification
         showNotificationBanner(`Added u/${username} to ignored users`, 2000);
     }
@@ -7191,7 +7595,7 @@ function createAgeCheckButton(username) {
     }
 
     button.onclick = () => handleAgeCheck(username);
-    
+
     // Right-click context menu
     button.oncontextmenu = (e) => {
         e.preventDefault();
@@ -7307,6 +7711,23 @@ loadSettings();
 
 // Load token on startup
 loadToken();
+
+// Register Tampermonkey context menu commands
+GM_registerMenuCommand('⚙️ Open Settings', () => {
+    showSettingsModal();
+});
+
+GM_registerMenuCommand('🔍 Manual Search', () => {
+    showManualSearchModal();
+});
+
+GM_registerMenuCommand('👥 View Ignored Users', () => {
+    showIgnoredUsersModal();
+});
+
+GM_registerMenuCommand('📍 View Tracked Subreddits', () => {
+    showTrackedSubredditsModal();
+});
 
 // Set up mutation observer
 const observer = new MutationObserver(debouncedMainLoop);
