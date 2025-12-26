@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.51
+// @version      1.52
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -1189,7 +1189,7 @@ GM_addStyle(`
 
     /* Context Menu Styles */
     .age-context-menu {
-        position: fixed;
+        position: absolute;
         background-color: var(--av-surface);
         border: 1px solid var(--av-border);
         border-radius: 4px;
@@ -1939,6 +1939,10 @@ function showIgnoredUsersModal() {
             ${ignoredUsersHTML}
             ${botsHTML}
         </div>
+        <div class="age-modal-buttons">
+            <button class="age-modal-button" id="open-full-settings">Open Full Settings</button>
+            <button class="age-modal-button secondary">Close</button>
+        </div>
     `;
 
     document.body.appendChild(modal);
@@ -1967,6 +1971,39 @@ function showIgnoredUsersModal() {
         closeModal();
         showSettingsModal();
     };
+
+    // Define remove handler function first (so addUser can use it)
+    const attachRemoveHandler = (btn) => {
+        btn.onclick = () => {
+            console.log('Remove button clicked!', btn.dataset.username);
+            const username = btn.dataset.username;
+            handleUnignoreUser(username);
+
+            // Update the modal
+            const userItem = btn.closest('.age-ignored-user-item');
+            userItem.remove();
+
+            // Update count in title
+            const titleDiv = modal.querySelector('.age-modal-title');
+            titleDiv.textContent = `Ignored Users (${userSettings.ignoredUsers.length})`;
+
+            // If no more users, show empty message
+            if (userSettings.ignoredUsers.length === 0) {
+                const listContainer = modal.querySelector('.age-ignored-users-list');
+                if (listContainer) {
+                    listContainer.innerHTML = '<p style="color: var(--av-text-muted); text-align: center; padding: 20px;">No manually ignored users</p>';
+                }
+            }
+        };
+    };
+
+    // Attach remove handlers for existing items
+    const removeButtons = modal.querySelectorAll('.age-ignored-user-remove');
+    console.log('Found remove buttons:', removeButtons.length);
+    removeButtons.forEach((btn, idx) => {
+        console.log(`Button ${idx}:`, btn.dataset.username);
+        attachRemoveHandler(btn);
+    });
 
     // Add user handler
     const addUserBtn = modal.querySelector('#add-ignore-user-btn');
@@ -2023,20 +2060,7 @@ function showIgnoredUsersModal() {
         listContainer2.appendChild(newItem);
 
         // Attach remove handler
-        newItem.querySelector('.age-ignored-user-remove').onclick = function() {
-            handleUnignoreUser(username);
-            newItem.remove();
-
-            const titleDiv = modal.querySelector('.age-modal-title');
-            titleDiv.textContent = `Ignored Users (${userSettings.ignoredUsers.length})`;
-
-            if (userSettings.ignoredUsers.length === 0) {
-                const list = modal.querySelector('.age-ignored-users-list');
-                if (list) {
-                    list.innerHTML = '<p style="color: var(--av-text-muted); text-align: center; padding: 20px;">No manually ignored users</p>';
-                }
-            }
-        };
+        attachRemoveHandler(newItem.querySelector('.age-ignored-user-remove'));
 
         // Update count
         const titleDiv = modal.querySelector('.age-modal-title');
@@ -2055,30 +2079,6 @@ function showIgnoredUsersModal() {
             addUser();
         }
     };
-
-    // Attach remove handlers
-    modal.querySelectorAll('.age-ignored-user-remove').forEach(btn => {
-        btn.onclick = () => {
-            const username = btn.dataset.username;
-            handleUnignoreUser(username);
-
-            // Update the modal
-            const userItem = btn.closest('.age-ignored-user-item');
-            userItem.remove();
-
-            // Update count in title
-            const titleDiv = modal.querySelector('.age-modal-title');
-            titleDiv.textContent = `Ignored Users (${userSettings.ignoredUsers.length})`;
-
-            // If no more users, show empty message
-            if (userSettings.ignoredUsers.length === 0) {
-                const listContainer = modal.querySelector('.age-ignored-users-list');
-                if (listContainer) {
-                    listContainer.innerHTML = '<p style="color: var(--av-text-muted); text-align: center; padding: 20px;">No manually ignored users</p>';
-                }
-            }
-        };
-    });
 }
 
 function showTrackedSubredditsModal() {
@@ -2165,6 +2165,38 @@ function showTrackedSubredditsModal() {
         showSettingsModal();
     };
 
+    // Define remove handler for subreddits
+    const attachRemoveHandler = (btn) => {
+        btn.onclick = () => {
+            const subreddit = btn.dataset.subreddit;
+            const idx = userSettings.trackedSubreddits.findIndex(s => s.toLowerCase() === subreddit.toLowerCase());
+            if (idx !== -1) {
+                userSettings.trackedSubreddits.splice(idx, 1);
+                saveSettings(userSettings);
+                showNotificationBanner(`Removed r/${subreddit} from tracked subreddits`, 2000);
+            }
+
+            // Update the modal
+            const subItem = btn.closest('.age-ignored-user-item');
+            subItem.remove();
+
+            // Update count in title
+            const titleDiv = modal.querySelector('.age-modal-title');
+            titleDiv.textContent = `Tracked Subreddits (${userSettings.trackedSubreddits.length})`;
+
+            // If no more subs, show empty message
+            if (userSettings.trackedSubreddits.length === 0) {
+                const listContainer = modal.querySelector('.age-ignored-users-list');
+                if (listContainer) {
+                    listContainer.innerHTML = '<p style="color: var(--av-text-muted); text-align: center; padding: 20px;">No tracked subreddits configured</p>';
+                }
+            }
+        };
+    };
+
+    // Attach remove handlers for existing items
+    modal.querySelectorAll('.age-ignored-user-remove').forEach(attachRemoveHandler);
+
     // Add subreddit handler
     const addSubBtn = modal.querySelector('#add-track-sub-btn');
     const subInput = modal.querySelector('#track-subreddit-input');
@@ -2210,26 +2242,7 @@ function showTrackedSubredditsModal() {
         listContainer2.appendChild(newItem);
 
         // Attach remove handler
-        newItem.querySelector('.age-ignored-user-remove').onclick = function() {
-            const idx = userSettings.trackedSubreddits.findIndex(s => s.toLowerCase() === subreddit);
-            if (idx !== -1) {
-                userSettings.trackedSubreddits.splice(idx, 1);
-                saveSettings(userSettings);
-                showNotificationBanner(`Removed r/${subreddit} from tracked subreddits`, 2000);
-            }
-
-            newItem.remove();
-
-            const titleDiv = modal.querySelector('.age-modal-title');
-            titleDiv.textContent = `Tracked Subreddits (${userSettings.trackedSubreddits.length})`;
-
-            if (userSettings.trackedSubreddits.length === 0) {
-                const list = modal.querySelector('.age-ignored-users-list');
-                if (list) {
-                    list.innerHTML = '<p style="color: var(--av-text-muted); text-align: center; padding: 20px;">No tracked subreddits configured</p>';
-                }
-            }
-        };
+        attachRemoveHandler(newItem.querySelector('.age-ignored-user-remove'));
 
         // Update count
         const titleDiv = modal.querySelector('.age-modal-title');
@@ -2249,31 +2262,6 @@ function showTrackedSubredditsModal() {
         }
     };
 
-    // Attach remove handlers for existing items
-    modal.querySelectorAll('.age-ignored-user-remove').forEach(btn => {
-        btn.onclick = () => {
-            const subreddit = btn.dataset.subreddit;
-            const idx = userSettings.trackedSubreddits.findIndex(s => s.toLowerCase() === subreddit.toLowerCase());
-            if (idx !== -1) {
-                userSettings.trackedSubreddits.splice(idx, 1);
-                saveSettings(userSettings);
-                showNotificationBanner(`Removed r/${subreddit} from tracked subreddits`, 2000);
-            }
-
-            const subItem = btn.closest('.age-ignored-user-item');
-            subItem.remove();
-
-            const titleDiv = modal.querySelector('.age-modal-title');
-            titleDiv.textContent = `Tracked Subreddits (${userSettings.trackedSubreddits.length})`;
-
-            if (userSettings.trackedSubreddits.length === 0) {
-                const listContainer = modal.querySelector('.age-ignored-users-list');
-                if (listContainer) {
-                    listContainer.innerHTML = '<p style="color: var(--av-text-muted); text-align: center; padding: 20px;">No tracked subreddits configured</p>';
-                }
-            }
-        };
-    });
 }
 
 function showSettingsModal() {
@@ -7571,6 +7559,21 @@ function handleIgnoreUser(username) {
 
         // Show notification
         showNotificationBanner(`Added u/${username} to ignored users`, 2000);
+    }
+}
+
+function handleUnignoreUser(username) {
+    // Remove from ignored users list
+    const index = userSettings.ignoredUsers.findIndex(u => u.toLowerCase() === username.toLowerCase());
+    if (index !== -1) {
+        userSettings.ignoredUsers.splice(index, 1);
+        saveSettings(userSettings);
+
+        // Re-run the main loop to add buttons back for this user
+        activeProcessor();
+
+        // Show notification
+        showNotificationBanner(`Removed u/${username} from ignored users`, 2000);
     }
 }
 
