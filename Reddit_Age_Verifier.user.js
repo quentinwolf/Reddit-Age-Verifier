@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.52
+// @version      1.54
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -112,8 +112,8 @@ const DEFAULT_SETTINGS = {
         auto_modmail: true,
     },
     customButtons: [
-        // Example: { id: 'clickme', label: 'Clickable Button', type: 'link', urlTemplate: 'https://someurl.here', enabled: true, style: 'danger' }
-        // Example: { id: 'verify', label: 'Verification', type: 'template', textTemplate: 'Your text here with {{author}}', enabled: true, style: 'primary' }
+        // Example: { id: 'clickme', label: 'Clickable Button', type: 'link', urlTemplate: 'https://someurl.here', enabled: true, style: 'danger', showInContextMenu: false }
+        // Example: { id: 'verify', label: 'Verification', type: 'template', textTemplate: 'Your text here with {{author}}', enabled: true, style: 'primary', showInContextMenu: true }
     ]
 };
 
@@ -1930,7 +1930,7 @@ function showIgnoredUsersModal() {
                 <div style="font-weight: bold; margin-bottom: 10px; color: var(--av-text);">Add User to Ignore List</div>
                 <div style="display: flex; gap: 10px;">
                     <input type="text" id="ignore-username-input" class="age-settings-input"
-                           placeholder="Enter username (without u/)"
+                           placeholder="Enter username (with or without u/)"
                            style="flex: 1; font-family: monospace;">
                     <button class="age-modal-button" id="add-ignore-user-btn">Add User</button>
                 </div>
@@ -2583,42 +2583,60 @@ function showSettingsModal() {
 
                 <div id="custom-buttons-list">
                     ${userSettings.customButtons.map((btn, idx) => `
-                        <div class="custom-button-editor" data-index="${idx}" style="background-color: var(--av-surface); padding: 12px; border-radius: 4px; margin-bottom: 10px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                                <span class="custom-button-drag-handle" title="Drag to reorder">⋮⋮</span>
-                                <button class="age-modal-button danger" style="margin: 0; padding: 4px 12px; font-size: 12px;"
+                        <div class="custom-button-editor" data-index="${idx}" style="background-color: var(--av-surface); padding: 12px; border-radius: 4px; margin-bottom: 10px; border-left: 3px solid var(--av-primary);">
+                            <!-- Header Row: Drag handle, checkboxes, and delete -->
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--av-border);">
+                                <div style="display: flex; align-items: center; gap: 15px;">
+                                    <span class="custom-button-drag-handle" title="Drag to reorder">⋮⋮</span>
+                                    <div style="display: flex; align-items: center; gap: 4px;">
+                                        <input type="checkbox" class="age-settings-checkbox custom-btn-enabled"
+                                               ${btn.enabled ? 'checked' : ''} id="custombtn-enabled-${idx}">
+                                        <label class="age-settings-label" for="custombtn-enabled-${idx}" style="flex: 0; margin: 0; font-size: 12px;">Enabled</label>
+                                    </div>
+                                    <div style="display: flex; align-items: center; gap: 4px;">
+                                        <input type="checkbox" class="age-settings-checkbox custom-btn-context-menu"
+                                               ${btn.showInContextMenu ? 'checked' : ''} id="custombtn-context-${idx}">
+                                        <label class="age-settings-label" for="custombtn-context-${idx}" style="flex: 0; margin: 0; font-size: 12px;">Context Menu</label>
+                                    </div>
+                                </div>
+                                <button class="age-modal-button danger" style="margin: 0; padding: 4px 12px; font-size: 11px;"
                                         onclick="this.closest('.custom-button-editor').remove()">Delete</button>
                             </div>
-                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-                                <input type="checkbox" class="age-settings-checkbox custom-btn-enabled"
-                                       ${btn.enabled ? 'checked' : ''} id="custombtn-enabled-${idx}">
-                                <label class="age-settings-label" for="custombtn-enabled-${idx}" style="flex: 0; margin: 0;">Enabled</label>
+
+                            <!-- Row 1: Label and Type side-by-side -->
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 10px;">
+                                <div style="display: flex; flex-direction: column; gap: 4px;">
+                                    <label class="age-settings-label" style="font-size: 11px; font-weight: bold;">Label</label>
+                                    <input type="text" class="age-settings-input custom-btn-label"
+                                           value="${escapeHtml(btn.label)}" style="width: 100%;">
+                                </div>
+                                <div style="display: flex; flex-direction: column; gap: 4px;">
+                                    <label class="age-settings-label" style="font-size: 11px; font-weight: bold;">Type</label>
+                                    <select class="age-settings-input custom-btn-type" style="width: 100%;">
+                                        <option value="link" ${btn.type === 'link' || !btn.type ? 'selected' : ''}>Link (opens URL)</option>
+                                        <option value="template" ${btn.type === 'template' ? 'selected' : ''}>Text Template (copy)</option>
+                                    </select>
+                                </div>
                             </div>
-                            <div class="age-settings-row">
-                                <label class="age-settings-label">Label:</label>
-                                <input type="text" class="age-settings-input custom-btn-label"
-                                       value="${escapeHtml(btn.label)}" style="width: 200px;">
-                            </div>
-                            <div class="age-settings-row">
-                                <label class="age-settings-label">Type:</label>
-                                <select class="age-settings-input custom-btn-type" style="width: 150px;">
-                                    <option value="link" ${btn.type === 'link' || !btn.type ? 'selected' : ''}>Link (opens URL)</option>
-                                    <option value="template" ${btn.type === 'template' ? 'selected' : ''}>Text Template (copy)</option>
-                                </select>
-                            </div>
-                            <div class="age-settings-row custom-btn-url-row" style="display: ${btn.type === 'template' ? 'none' : 'flex'};">
-                                <label class="age-settings-label">URL Template:</label>
+
+                            <!-- Row 2: URL Template (full width, shown for link type) -->
+                            <div class="custom-btn-url-row" style="display: ${btn.type === 'template' ? 'none' : 'flex'}; flex-direction: column; gap: 4px; margin-bottom: 10px;">
+                                <label class="age-settings-label" style="font-size: 11px; font-weight: bold;">URL Template</label>
                                 <input type="text" class="age-settings-input custom-btn-url"
-                                       value="${escapeHtml(btn.urlTemplate || '')}" style="width: 400px; font-family: monospace; font-size: 11px;">
+                                       value="${escapeHtml(btn.urlTemplate || '')}" style="width: 100%; font-family: monospace; font-size: 11px;">
                             </div>
-                            <div class="age-settings-row custom-btn-template-row" style="display: ${btn.type === 'template' ? 'flex' : 'none'}; align-items: flex-start;">
-                                <label class="age-settings-label">Text Template:</label>
+
+                            <!-- Row 2: Text Template (full width, shown for template type) -->
+                            <div class="custom-btn-template-row" style="display: ${btn.type === 'template' ? 'flex' : 'none'}; flex-direction: column; gap: 4px; margin-bottom: 10px;">
+                                <label class="age-settings-label" style="font-size: 11px; font-weight: bold;">Text Template</label>
                                 <textarea class="age-settings-input custom-btn-template"
-                                          style="width: 400px; min-height: 120px; font-family: monospace; font-size: 11px; resize: vertical;">${escapeHtml(btn.textTemplate || '')}</textarea>
+                                          style="width: 100%; min-height: 100px; font-family: monospace; font-size: 11px; resize: vertical;">${escapeHtml(btn.textTemplate || '')}</textarea>
                             </div>
-                            <div class="age-settings-row">
-                                <label class="age-settings-label">Button Style:</label>
-                                <select class="age-settings-input custom-btn-style" style="width: 120px;">
+
+                            <!-- Row 3: Button Style (compact) -->
+                            <div style="display: flex; flex-direction: column; gap: 4px; width: 200px;">
+                                <label class="age-settings-label" style="font-size: 11px; font-weight: bold;">Button Style</label>
+                                <select class="age-settings-input custom-btn-style" style="width: 100%;">
                                     <option value="primary" ${btn.style === 'primary' ? 'selected' : ''}>Primary (Blue)</option>
                                     <option value="secondary" ${btn.style === 'secondary' ? 'selected' : ''}>Secondary (Gray)</option>
                                     <option value="danger" ${btn.style === 'danger' ? 'selected' : ''}>Danger (Red)</option>
@@ -2757,6 +2775,7 @@ function showSettingsModal() {
                 urlTemplate: btnType === 'link' ? editor.querySelector('.custom-btn-url').value : '',
                 textTemplate: btnType === 'template' ? editor.querySelector('.custom-btn-template').value : '',
                 enabled: editor.querySelector('.custom-btn-enabled').checked,
+                showInContextMenu: editor.querySelector('.custom-btn-context-menu').checked,
                 style: editor.querySelector('.custom-btn-style').value
             });
         });
@@ -2863,42 +2882,60 @@ function showSettingsModal() {
             const newIndex = modal.querySelectorAll('.custom-button-editor').length;
 
             const newButtonHTML = `
-                <div class="custom-button-editor" data-index="${newIndex}" style="background-color: var(--av-surface); padding: 12px; border-radius: 4px; margin-bottom: 10px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                        <span class="custom-button-drag-handle" title="Drag to reorder">⋮⋮</span>
-                        <button class="age-modal-button danger" style="margin: 0; padding: 4px 12px; font-size: 12px;"
+                <div class="custom-button-editor" data-index="${newIndex}" style="background-color: var(--av-surface); padding: 12px; border-radius: 4px; margin-bottom: 10px; border-left: 3px solid var(--av-primary);">
+                    <!-- Header Row: Drag handle, checkboxes, and delete -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--av-border);">
+                        <div style="display: flex; align-items: center; gap: 15px;">
+                            <span class="custom-button-drag-handle" title="Drag to reorder">⋮⋮</span>
+                            <div style="display: flex; align-items: center; gap: 4px;">
+                                <input type="checkbox" class="age-settings-checkbox custom-btn-enabled"
+                                       checked id="custombtn-enabled-${newIndex}">
+                                <label class="age-settings-label" for="custombtn-enabled-${newIndex}" style="flex: 0; margin: 0; font-size: 12px;">Enabled</label>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 4px;">
+                                <input type="checkbox" class="age-settings-checkbox custom-btn-context-menu"
+                                       id="custombtn-context-${newIndex}">
+                                <label class="age-settings-label" for="custombtn-context-${newIndex}" style="flex: 0; margin: 0; font-size: 12px;">In Menu</label>
+                            </div>
+                        </div>
+                        <button class="age-modal-button danger" style="margin: 0; padding: 4px 12px; font-size: 11px;"
                                 onclick="this.closest('.custom-button-editor').remove()">Delete</button>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-                        <input type="checkbox" class="age-settings-checkbox custom-btn-enabled"
-                               checked id="custombtn-enabled-${newIndex}">
-                        <label class="age-settings-label" for="custombtn-enabled-${newIndex}" style="flex: 0; margin: 0;">Enabled</label>
+
+                    <!-- Row 1: Label and Type side-by-side -->
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 10px;">
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <label class="age-settings-label" style="font-size: 11px; font-weight: bold;">Label</label>
+                            <input type="text" class="age-settings-input custom-btn-label"
+                                   value="New Button" style="width: 100%;">
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <label class="age-settings-label" style="font-size: 11px; font-weight: bold;">Type</label>
+                            <select class="age-settings-input custom-btn-type" style="width: 100%;">
+                                <option value="link" selected>Link (opens URL)</option>
+                                <option value="template">Text Template (copy)</option>
+                            </select>
+                        </div>
                     </div>
-                    <div class="age-settings-row">
-                        <label class="age-settings-label">Label:</label>
-                        <input type="text" class="age-settings-input custom-btn-label"
-                               value="New Button" style="width: 200px;">
-                    </div>
-                    <div class="age-settings-row">
-                        <label class="age-settings-label">Type:</label>
-                        <select class="age-settings-input custom-btn-type" style="width: 150px;">
-                            <option value="link" selected>Link (opens URL)</option>
-                            <option value="template">Text Template (copy)</option>
-                        </select>
-                    </div>
-                    <div class="age-settings-row custom-btn-url-row">
-                        <label class="age-settings-label">URL Template:</label>
+
+                    <!-- Row 2: URL Template (full width, shown for link type) -->
+                    <div class="custom-btn-url-row" style="display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px;">
+                        <label class="age-settings-label" style="font-size: 11px; font-weight: bold;">URL Template</label>
                         <input type="text" class="age-settings-input custom-btn-url"
-                               value="https://example.com/{{author}}" style="width: 400px; font-family: monospace; font-size: 11px;">
+                               value="https://example.com/{{author}}" style="width: 100%; font-family: monospace; font-size: 11px;">
                     </div>
-                    <div class="age-settings-row custom-btn-template-row" style="display: none; align-items: flex-start;">
-                        <label class="age-settings-label">Text Template:</label>
+
+                    <!-- Row 2: Text Template (full width, shown for template type) -->
+                    <div class="custom-btn-template-row" style="display: none; flex-direction: column; gap: 4px; margin-bottom: 10px;">
+                        <label class="age-settings-label" style="font-size: 11px; font-weight: bold;">Text Template</label>
                         <textarea class="age-settings-input custom-btn-template"
-                                  style="width: 400px; min-height: 120px; font-family: monospace; font-size: 11px; resize: vertical;"></textarea>
+                                  style="width: 100%; min-height: 100px; font-family: monospace; font-size: 11px; resize: vertical;"></textarea>
                     </div>
-                    <div class="age-settings-row">
-                        <label class="age-settings-label">Button Style:</label>
-                        <select class="age-settings-input custom-btn-style" style="width: 120px;">
+
+                    <!-- Row 3: Button Style (compact) -->
+                    <div style="display: flex; flex-direction: column; gap: 4px; width: 200px;">
+                        <label class="age-settings-label" style="font-size: 11px; font-weight: bold;">Button Style</label>
+                        <select class="age-settings-input custom-btn-style" style="width: 100%;">
                             <option value="primary" selected>Primary (Blue)</option>
                             <option value="secondary">Secondary (Gray)</option>
                             <option value="danger">Danger (Red)</option>
@@ -7299,9 +7336,14 @@ function attachCustomButtonHandlers(modal) {
                     }, 1500);
                 }
             } else {
-                // Open link in new window
+                // Open link - use _blank for http(s), direct navigation for protocol handlers
                 const url = btn.dataset.customUrl;
-                window.open(url, '_blank');
+                if (url.startsWith('http://') || url.startsWith('https://')) {
+                    window.open(url, '_blank');
+                } else {
+                    // Protocol handlers (tg://, mailto:, etc.) don't need new window
+                    window.location.href = url;
+                }
             }
         };
     });
@@ -7423,7 +7465,22 @@ function showContextMenu(event, username) {
 
     const cached = getCachedAgeData(username);
 
+    // Build custom buttons section
+    const customButtons = userSettings.customButtons.filter(btn => btn.enabled && btn.showInContextMenu);
+    const customButtonsHTML = customButtons.length > 0 ? `
+        ${customButtons.map(btn => `
+            <div class="age-context-menu-item" data-action="custom-button" data-button-id="${btn.id}">
+                <span>${btn.type === 'template' ? '📋' : '🔗'}</span>
+                <span>${escapeHtml(btn.label)}</span>
+            </div>
+        `).join('')}
+        <div class="age-context-menu-separator"></div>
+    ` : '';
+
     menu.innerHTML = `
+        <div style="padding: 8px 16px; font-weight: bold; color: var(--av-text); border-bottom: 1px solid var(--av-border); background-color: var(--av-analysis-header);">
+            u/${escapeHtml(username)}
+        </div>
         <div class="age-context-menu-item" data-action="manual-search">
             <span>🔍</span>
             <span>Manual Search</span>
@@ -7438,6 +7495,7 @@ function showContextMenu(event, username) {
             <span>Add to Ignored Users</span>
         </div>
         <div class="age-context-menu-separator"></div>
+        ${customButtonsHTML}
         <div class="age-context-menu-item" data-action="settings">
             <span>⚙️</span>
             <span>Settings</span>
@@ -7465,6 +7523,10 @@ function showContextMenu(event, username) {
             closeContextMenu();
 
             switch (action) {
+                case 'custom-button':
+                    await handleCustomButtonClick(item.dataset.buttonId, username, getCachedAgeData(username));
+                    break;
+
                 case 'settings':
                     showSettingsModal();
                     break;
@@ -7542,6 +7604,50 @@ async function handleDeepAnalysisQuick(username) {
                     showTokenModal(username);
                 }, 100);
             }
+        }
+    }
+}
+
+async function handleCustomButtonClick(buttonId, username, ageData) {
+    const btn = userSettings.customButtons.find(b => b.id === buttonId);
+    if (!btn) return;
+
+    const postedAges = ageData?.postedAges || [];
+    const possibleAges = ageData?.possibleAges || [];
+
+    const placeholders = {
+        author: username,
+        age_min: postedAges.length > 0 ? Math.min(...postedAges) : '',
+        age_max: postedAges.length > 0 ? Math.max(...postedAges) : '',
+        posted_ages: postedAges.join(','),
+        possible_ages: possibleAges.join(',')
+    };
+
+    if (btn.type === 'template') {
+        // Copy template to clipboard
+        let template = btn.textTemplate || '';
+        Object.keys(placeholders).forEach(key => {
+            template = template.replace(new RegExp(`{{${key}}}`, 'g'), placeholders[key]);
+        });
+
+        try {
+            await navigator.clipboard.writeText(template);
+            showNotificationBanner(`✓ Copied "${btn.label}" to clipboard`, 1500);
+        } catch (err) {
+            console.error('Copy failed:', err);
+            showNotificationBanner(`✗ Failed to copy "${btn.label}"`, 1500);
+        }
+    } else {
+        // Navigate to URL
+        let url = btn.urlTemplate || '';
+        Object.keys(placeholders).forEach(key => {
+            url = url.replace(new RegExp(`{{${key}}}`, 'g'), placeholders[key]);
+        });
+
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+            window.open(url, '_blank');
+        } else {
+            window.location.href = url;
         }
     }
 }
