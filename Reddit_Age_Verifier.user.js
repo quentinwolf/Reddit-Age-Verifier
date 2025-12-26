@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.49
+// @version      1.50
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -1184,6 +1184,44 @@ GM_addStyle(`
             transform: translateX(-50%) translateY(20px);
             opacity: 0;
         }
+    }
+
+    /* Context Menu Styles */
+    .age-context-menu {
+        position: fixed;
+        background-color: var(--av-surface);
+        border: 1px solid var(--av-border);
+        border-radius: 4px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        z-index: 999999;
+        min-width: 180px;
+        padding: 4px 0;
+    }
+
+    .age-context-menu-item {
+        padding: 8px 16px;
+        color: var(--av-text);
+        font-size: 13px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        transition: background-color 0.1s;
+    }
+
+    .age-context-menu-item:hover {
+        background-color: var(--av-primary);
+        color: white;
+    }
+
+    .age-context-menu-item.danger:hover {
+        background-color: var(--av-danger);
+    }
+
+    .age-context-menu-separator {
+        height: 1px;
+        background-color: var(--av-border);
+        margin: 4px 0;
     }
 
     /* Manual Search Styles */
@@ -6974,6 +7012,164 @@ async function handleAgeCheck(username) {
     }
 }
 
+// ============================================================================
+// CONTEXT MENU
+// ============================================================================
+
+let activeContextMenu = null;
+
+function showContextMenu(event, username) {
+    event.preventDefault();
+    
+    // Close any existing context menu
+    closeContextMenu();
+    
+    const menu = document.createElement('div');
+    menu.className = 'age-context-menu';
+    menu.style.left = event.pageX + 'px';
+    menu.style.top = event.pageY + 'px';
+    
+    const cached = getCachedAgeData(username);
+    
+    menu.innerHTML = `
+        <div class="age-context-menu-item" data-action="manual-search">
+            <span>🔍</span>
+            <span>Manual Search</span>
+        </div>
+        <div class="age-context-menu-item" data-action="deep-analysis">
+            <span>📊</span>
+            <span>Deep Analysis</span>
+        </div>
+        <div class="age-context-menu-separator"></div>
+        <div class="age-context-menu-item danger" data-action="ignore">
+            <span>🚫</span>
+            <span>Add to Ignored Users</span>
+        </div>
+        <div class="age-context-menu-separator"></div>
+        <div class="age-context-menu-item" data-action="settings">
+            <span>⚙️</span>
+            <span>Settings</span>
+        </div>
+    `;
+    
+    document.body.appendChild(menu);
+    activeContextMenu = menu;
+    
+    // Adjust position if menu would go off-screen
+    const rect = menu.getBoundingClientRect();
+    if (rect.right > window.innerWidth) {
+        menu.style.left = (event.pageX - rect.width) + 'px';
+    }
+    if (rect.bottom > window.innerHeight) {
+        menu.style.top = (event.pageY - rect.height) + 'px';
+    }
+    
+    // Handle menu item clicks
+    menu.querySelectorAll('.age-context-menu-item').forEach(item => {
+        item.onclick = async (e) => {
+            e.stopPropagation();
+            const action = item.dataset.action;
+            
+            closeContextMenu();
+            
+            switch (action) {
+                case 'settings':
+                    showSettingsModal();
+                    break;
+                    
+                case 'manual-search':
+                    showManualSearchModal(username);
+                    break;
+                    
+                case 'deep-analysis':
+                    await handleDeepAnalysisQuick(username);
+                    break;
+                    
+                case 'ignore':
+                    handleIgnoreUser(username);
+                    break;
+            }
+        };
+    });
+    
+    // Close menu on click outside
+    setTimeout(() => {
+        document.addEventListener('click', closeContextMenu);
+        document.addEventListener('contextmenu', closeContextMenu);
+    }, 0);
+}
+
+function closeContextMenu() {
+    if (activeContextMenu && activeContextMenu.parentNode) {
+        activeContextMenu.parentNode.removeChild(activeContextMenu);
+        activeContextMenu = null;
+    }
+    document.removeEventListener('click', closeContextMenu);
+    document.removeEventListener('contextmenu', closeContextMenu);
+}
+
+async function handleDeepAnalysisQuick(username) {
+    const cached = getCachedAgeData(username);
+    
+    if (cached) {
+        // Already have data, go straight to deep analysis
+        const analysis = performDeepAnalysis(cached, username);
+        showDeepAnalysisModal(username, cached, analysis);
+    } else {
+        // Need to fetch data first
+        if (!apiToken) {
+            attemptAutoFetchToken();
+            showTokenModal(username);
+            return;
+        }
+        
+        const loadingModalId = showLoadingModal(username);
+        
+        try {
+            const results = await searchUserAges(username);
+            const ageData = processResults(results, username);
+            
+            // Cache the results
+            setCachedAgeData(username, ageData);
+            updateButtonCacheForUser(username, ageData);
+            updateButtonForUser(username);
+            
+            // Close loading modal
+            closeModalById(loadingModalId);
+            
+            // Go straight to deep analysis
+            const analysis = performDeepAnalysis(ageData, username);
+            showDeepAnalysisModal(username, ageData, analysis);
+        } catch (error) {
+            console.error('Age check error:', error);
+            closeModalById(loadingModalId);
+            showErrorModal(username, error.message);
+            
+            if (error.message.includes('token') || error.message.includes('Token')) {
+                setTimeout(() => {
+                    showTokenModal(username);
+                }, 100);
+            }
+        }
+    }
+}
+
+function handleIgnoreUser(username) {
+    // Add to ignored users list
+    if (!userSettings.ignoredUsers.includes(username)) {
+        userSettings.ignoredUsers.push(username);
+        saveSettings(userSettings);
+        
+        // Remove all buttons for this user
+        document.querySelectorAll(`.age-check-button[data-username="${username}"]`).forEach(btn => {
+            btn.remove();
+        });
+        
+        // Show notification
+        showNotificationBanner(`Added u/${username} to ignored users`, 2000);
+    }
+}
+
 function createAgeCheckButton(username) {
     // Check if user is ignored
     const ignoredUsers = getIgnoredUsersList();
@@ -6995,6 +7191,12 @@ function createAgeCheckButton(username) {
     }
 
     button.onclick = () => handleAgeCheck(username);
+    
+    // Right-click context menu
+    button.oncontextmenu = (e) => {
+        e.preventDefault();
+        showContextMenu(e, username);
+    };
 
     return button;
 }
@@ -7110,9 +7312,15 @@ loadToken();
 const observer = new MutationObserver(debouncedMainLoop);
 observer.observe(document.body, { childList: true, subtree: true });
 
-// Escape key handler to close topmost modal
+// Escape key handler to close topmost modal and context menu
 document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape' || e.keyCode === 27) {
+        // Close context menu if open
+        if (activeContextMenu) {
+            closeContextMenu();
+            return;
+        }
+
         // Find the modal with the highest z-index
         let topmostModal = null;
         let highestZIndex = -1;
