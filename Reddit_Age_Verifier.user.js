@@ -1879,8 +1879,8 @@ function showIgnoredUsersModal() {
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
     modal.dataset.modalId = modalId;
-    modal.style.width = '550px';
-    modal.style.maxWidth = '550px';
+    modal.style.width = '500px';
+    modal.style.maxWidth = '500px';
     modal.style.maxHeight = '900px';
     modal.style.zIndex = ++zIndexCounter;
 
@@ -2088,8 +2088,8 @@ function showTrackedSubredditsModal() {
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
     modal.dataset.modalId = modalId;
-    modal.style.width = '550px';
-    modal.style.maxWidth = '550px';
+    modal.style.width = '500px';
+    modal.style.maxWidth = '500px';
     modal.style.maxHeight = '900px';
     modal.style.zIndex = ++zIndexCounter;
 
@@ -2556,6 +2556,15 @@ function showSettingsModal() {
                 </div>
             </div>
 
+            <!-- Tracked Subreddits -->
+            <div class="age-settings-section">
+                <div class="age-settings-section-title">Tracked Subreddits</div>
+                <p class="age-settings-help-text">Subreddits you moderate - used in Deep Analysis to detect if users post different ages on your subs vs elsewhere. Enter comma-separated names (with or without r/ prefix).</p>
+                <textarea class="age-settings-input" id="setting-tracked-subs"
+                          style="width: 100%; font-family: monospace; min-height: 80px; resize: vertical;"
+                          placeholder="subreddit1, subreddit2, r/subreddit3">${(userSettings.trackedSubreddits || []).join(', ')}</textarea>
+            </div>
+
             <!-- Common Bots -->
             <div class="age-settings-section">
                 <div class="age-settings-section-title">Common Bots to Ignore</div>
@@ -2565,14 +2574,16 @@ function showSettingsModal() {
                 </div>
             </div>
 
-            <!-- Tracked Subreddits -->
+            <!-- Ignored Users -->
             <div class="age-settings-section">
-                <div class="age-settings-section-title">Tracked Subreddits</div>
-                <p class="age-settings-help-text">Subreddits you moderate - used in Deep Analysis to detect if users post different ages on your subs vs elsewhere. Enter comma-separated names (with or without r/ prefix).</p>
-                <input type="text" class="age-settings-input" id="setting-tracked-subs"
-                       style="width: 100%; font-family: monospace;"
-                       value="${(userSettings.trackedSubreddits || []).join(', ')}"
-                       placeholder="subreddit1, subreddit2, r/subreddit3">
+                <div class="age-settings-section-title">Ignored Users</div>
+                ${ignoredUsersListHTML}<br />
+                <p class="age-settings-help-text">Add usernames (one per line) to never show age check buttons for</p>
+                <textarea class="age-settings-textarea" id="ignored-users-input"
+                          placeholder="username1&#10;username2&#10;username3"></textarea>
+                <div class="age-settings-buttons-row">
+                    <button class="age-modal-button" id="add-ignored-users">Add Users</button>
+                </div>
             </div>
 
             <!-- Custom Buttons -->
@@ -2650,18 +2661,6 @@ function showSettingsModal() {
 
                 <div class="age-settings-buttons-row">
                     <button class="age-modal-button" id="add-custom-button">Add New Button</button>
-                </div>
-            </div>
-
-            <!-- Ignored Users -->
-            <div class="age-settings-section">
-                <div class="age-settings-section-title">Ignored Users</div>
-                ${ignoredUsersListHTML}<br />
-                <p class="age-settings-help-text">Add usernames (one per line) to never show age check buttons for</p>
-                <textarea class="age-settings-textarea" id="ignored-users-input"
-                          placeholder="username1&#10;username2&#10;username3"></textarea>
-                <div class="age-settings-buttons-row">
-                    <button class="age-modal-button" id="add-ignored-users">Add Users</button>
                 </div>
             </div>
 
