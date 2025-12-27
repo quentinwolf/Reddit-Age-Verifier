@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.57
+// @version      1.58
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -1226,6 +1226,33 @@ GM_addStyle(`
     .age-context-menu-item:hover {
         background-color: var(--av-primary);
         color: white;
+    }
+
+    .age-context-menu-item {
+        position: relative;
+    }
+
+    .age-context-submenu {
+        position: absolute;
+        left: 100%;
+        top: 0;
+        background-color: var(--av-surface);
+        border: 1px solid var(--av-border);
+        border-radius: 4px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        min-width: 180px;
+        padding: 4px 0;
+        display: none;
+        z-index: 1000000;
+    }
+
+    .age-context-menu-item:hover .age-context-submenu {
+        display: block;
+    }
+
+    .age-context-menu-arrow {
+        margin-left: auto;
+        opacity: 0.6;
     }
 
     .age-context-menu-item.danger:hover {
@@ -7513,6 +7540,17 @@ function showContextMenu(event, username) {
         <div class="age-context-menu-item" data-action="settings">
             <span>⚙️</span>
             <span>Settings</span>
+            <span class="age-context-menu-arrow">▶</span>
+            <div class="age-context-submenu">
+                <div class="age-context-menu-item" data-action="ignored-users">
+                    <span>🚫</span>
+                    <span>Ignored Users</span>
+                </div>
+                <div class="age-context-menu-item" data-action="tracked-subs">
+                    <span>📍</span>
+                    <span>Tracked Subreddits</span>
+                </div>
+            </div>
         </div>
     `;
 
@@ -7543,6 +7581,14 @@ function showContextMenu(event, username) {
 
                 case 'settings':
                     showSettingsModal();
+                    break;
+
+                case 'ignored-users':
+                    showIgnoredUsersModal();
+                    break;
+
+                case 'tracked-subs':
+                    showTrackedSubredditsModal();
                     break;
 
                 case 'manual-search':
