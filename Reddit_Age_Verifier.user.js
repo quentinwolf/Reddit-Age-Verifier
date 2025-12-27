@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.54
+// @version      1.55
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -1877,11 +1877,11 @@ function showIgnoredUsersModal() {
     const modalId = `age-modal-${modalCounter++}`;
 
     const modal = document.createElement('div');
-    modal.className = 'age-modal';
+    modal.className = 'age-modal resizable';
     modal.dataset.modalId = modalId;
-    modal.style.minWidth = '500px';
-    modal.style.width = '650px';
-    modal.style.maxHeight = '700px';
+    modal.style.width = '500px';
+    modal.style.maxWidth = '500px';
+    modal.style.maxHeight = '900px';
     modal.style.zIndex = ++zIndexCounter;
 
     const ignoredList = userSettings.ignoredUsers;
@@ -1891,7 +1891,7 @@ function showIgnoredUsersModal() {
     if (ignoredList.length === 0) {
         ignoredUsersHTML = '<p style="color: var(--av-text-muted); text-align: center; padding: 20px;">No manually ignored users</p>';
     } else {
-        ignoredUsersHTML = `<div class="age-ignored-users-list">
+        ignoredUsersHTML = `<div class="age-ignored-users-list" style="max-height: none;">
             ${ignoredList.map(user => `
                 <div class="age-ignored-user-item">
                     <span class="age-ignored-user-name">u/${escapeHtml(user)}</span>
@@ -2010,7 +2010,7 @@ function showIgnoredUsersModal() {
     const usernameInput = modal.querySelector('#ignore-username-input');
 
     const addUser = () => {
-        const username = usernameInput.value.trim().replace(/^u\//, '');
+        const username = usernameInput.value.trim().replace(/^u\/|^\/u\//i, '');
         if (!username) {
             alert('Please enter a username');
             return;
@@ -2042,6 +2042,7 @@ function showIgnoredUsersModal() {
 
             const newList = document.createElement('div');
             newList.className = 'age-ignored-users-list';
+            newList.style.maxHeight = 'none';
             const botsSection = modal.querySelector('.age-modal-content > div[style*="border-top"]');
             if (botsSection) {
                 botsSection.parentNode.insertBefore(newList, botsSection);
@@ -2085,11 +2086,11 @@ function showTrackedSubredditsModal() {
     const modalId = `age-modal-${modalCounter++}`;
 
     const modal = document.createElement('div');
-    modal.className = 'age-modal';
+    modal.className = 'age-modal resizable';
     modal.dataset.modalId = modalId;
-    modal.style.minWidth = '500px';
-    modal.style.width = '650px';
-    modal.style.maxHeight = '700px';
+    modal.style.width = '500px';
+    modal.style.maxWidth = '500px';
+    modal.style.maxHeight = '900px';
     modal.style.zIndex = ++zIndexCounter;
 
     const trackedSubs = userSettings.trackedSubreddits || [];
@@ -2098,7 +2099,7 @@ function showTrackedSubredditsModal() {
     if (trackedSubs.length === 0) {
         subsHTML = '<p style="color: var(--av-text-muted); text-align: center; padding: 20px;">No tracked subreddits configured</p>';
     } else {
-        subsHTML = `<div class="age-ignored-users-list">
+        subsHTML = `<div class="age-ignored-users-list" style="max-height: none;">
             ${trackedSubs.map(sub => `
                 <div class="age-ignored-user-item">
                     <span class="age-ignored-user-name">r/${escapeHtml(sub)}</span>
@@ -2229,6 +2230,7 @@ function showTrackedSubredditsModal() {
 
             const newList = document.createElement('div');
             newList.className = 'age-ignored-users-list';
+            newList.style.maxHeight = 'none';
             modal.querySelector('.age-modal-content').appendChild(newList);
         }
 
@@ -2840,7 +2842,7 @@ function showSettingsModal() {
         const textarea = modal.querySelector('#ignored-users-input');
         const newUsers = textarea.value
             .split('\n')
-            .map(u => u.trim())
+            .map(u => u.trim().replace(/^u\/|^\/u\//i, ''))
             .filter(u => u.length > 0)
             .filter(u => !userSettings.ignoredUsers.includes(u)); // Don't add duplicates
 
