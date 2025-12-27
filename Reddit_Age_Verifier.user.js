@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.58
+// @version      1.59
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -230,6 +230,14 @@ function applyTheme() {
     document.documentElement.style.setProperty('--av-link', colors.link);
     document.documentElement.style.setProperty('--av-button-default', userSettings.buttonDefaultColor);
     document.documentElement.style.setProperty('--av-button-cached', userSettings.buttonCachedColor);
+}
+
+// Extract version from userscript metadata
+function getScriptVersion() {
+    const scriptText = GM_info.script.version ||
+          (document.querySelector('script[type="text/javascript"]')?.textContent.match(/@version\s+([\d.]+)/) || [])[1] ||
+          'unknown';
+    return scriptText;
 }
 
 function getIgnoredUsersList() {
@@ -2317,6 +2325,8 @@ function showSettingsModal() {
     modal.style.height = '80vh';
     modal.style.zIndex = ++zIndexCounter;
 
+    let scriptVersion = getScriptVersion();
+
     // Build common bots checkboxes
     const commonBotsHTML = Object.keys(DEFAULT_SETTINGS.commonBots).map(botName => {
         const isChecked = userSettings.commonBots[botName] ? 'checked' : '';
@@ -2344,7 +2354,7 @@ function showSettingsModal() {
         modal.innerHTML = `
         <div class="age-modal-header">
             <div class="age-modal-title-row">
-                <div class="age-modal-title">Settings</div>
+                <div class="age-modal-title">Settings - Ver. ${scriptVersion}</div>
                 <button class="age-modal-close">&times;</button>
             </div>
         </div>
