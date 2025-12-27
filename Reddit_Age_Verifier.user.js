@@ -1879,8 +1879,8 @@ function showIgnoredUsersModal() {
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
     modal.dataset.modalId = modalId;
-    modal.style.width = '500px';
-    modal.style.maxWidth = '500px';
+    modal.style.width = '550px';
+    modal.style.maxWidth = '550px';
     modal.style.maxHeight = '900px';
     modal.style.zIndex = ++zIndexCounter;
 
@@ -2088,8 +2088,8 @@ function showTrackedSubredditsModal() {
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
     modal.dataset.modalId = modalId;
-    modal.style.width = '500px';
-    modal.style.maxWidth = '500px';
+    modal.style.width = '550px';
+    modal.style.maxWidth = '550px';
     modal.style.maxHeight = '900px';
     modal.style.zIndex = ++zIndexCounter;
 
