@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.55
+// @version      1.56
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -745,7 +745,8 @@ GM_addStyle(`
         color: var(--av-text);
         padding: 6px 10px;
         font-size: 13px;
-        width: 80px;
+        width: 100%;
+        box-sizing: border-box;
     }
 
     .age-settings-input:focus {
@@ -770,6 +771,7 @@ GM_addStyle(`
         font-size: 12px;
         font-family: monospace;
         resize: vertical;
+        box-sizing: border-box;
     }
 
     .age-settings-textarea:focus {
