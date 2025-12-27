@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.56
+// @version      1.57
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -746,6 +746,17 @@ GM_addStyle(`
         padding: 6px 10px;
         font-size: 13px;
         width: 100%;
+        box-sizing: border-box;
+    }
+
+    .age-settings-numberinput {
+        background-color: var(--av-surface);
+        border: 1px solid var(--av-border);
+        border-radius: 4px;
+        color: var(--av-text);
+        padding: 6px 10px;
+        font-size: 13px;
+        width: 120px;
         box-sizing: border-box;
     }
 
@@ -2274,8 +2285,8 @@ function showSettingsModal() {
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
     modal.dataset.modalId = modalId;
-    modal.style.minWidth = '500px';
-    modal.style.width = '500px';
+    modal.style.minWidth = '565px';
+    modal.style.width = '565px';
     modal.style.height = '80vh';
     modal.style.zIndex = ++zIndexCounter;
 
@@ -2484,13 +2495,13 @@ function showSettingsModal() {
 
                 <div class="age-settings-row">
                     <label class="age-settings-label">Pagination Fetch Limit</label>
-                    <input type="number" class="age-settings-input" id="setting-pagination-limit"
+                    <input type="number" class="age-settings-numberinput" id="setting-pagination-limit"
                            value="${userSettings.paginationLimit}" min="50" max="1000" step="50">
                 </div>
 
                 <div class="age-settings-row">
                     <label class="age-settings-label">Minimum Age Gap for Couples Detection (years)</label>
-                    <input type="number" class="age-settings-input" id="setting-min-couples-gap"
+                    <input type="number" class="age-settings-numberinput" id="setting-min-couples-gap"
                            value="${userSettings.minCouplesAgeGap}" min="4" max="10" step="1">
                 </div>
                 <span class="age-settings-help-text" style="display: block; margin-top: -8px; margin-bottom: 12px;">
@@ -2512,13 +2523,13 @@ function showSettingsModal() {
 
                 <div class="age-settings-row">
                     <label class="age-settings-label">Minimum Age</label>
-                    <input type="number" class="age-settings-input" id="setting-min-age"
+                    <input type="number" class="age-settings-numberinput" id="setting-min-age"
                            value="${userSettings.minAge}" min="1" max="99">
                 </div>
 
                 <div class="age-settings-row">
                     <label class="age-settings-label">Maximum Age</label>
-                    <input type="number" class="age-settings-input" id="setting-max-age"
+                    <input type="number" class="age-settings-numberinput" id="setting-max-age"
                            value="${userSettings.maxAge}" min="1" max="99">
                 </div>
             </div>
@@ -2529,31 +2540,31 @@ function showSettingsModal() {
 
                 <div class="age-settings-row">
                     <label class="age-settings-label">Title Snippet Length (characters)</label>
-                    <input type="number" class="age-settings-input" id="setting-title-length"
+                    <input type="number" class="age-settings-numberinput" id="setting-title-length"
                            value="${userSettings.titleSnippetLength}" min="50" max="500">
                 </div>
 
                 <div class="age-settings-row">
                     <label class="age-settings-label">Body Snippet Length (characters)</label>
-                    <input type="number" class="age-settings-input" id="setting-body-length"
+                    <input type="number" class="age-settings-numberinput" id="setting-body-length"
                            value="${userSettings.bodySnippetLength}" min="50" max="1000">
                 </div>
 
                 <div class="age-settings-row">
                     <label class="age-settings-label">Cache Expiration (days)</label>
-                    <input type="number" class="age-settings-input" id="setting-cache-days"
+                    <input type="number" class="age-settings-numberinput" id="setting-cache-days"
                            value="${userSettings.cacheExpiration}" min="1" max="90">
                 </div>
 
                 <div class="age-settings-row">
                     <label class="age-settings-label">Default Modal Width (pixels)</label>
-                    <input type="number" class="age-settings-input" id="setting-modal-width"
+                    <input type="number" class="age-settings-numberinput" id="setting-modal-width"
                            value="${userSettings.modalWidth}" min="400" max="2000">
                 </div>
 
                 <div class="age-settings-row">
                     <label class="age-settings-label">Default Modal Height (pixels)</label>
-                    <input type="number" class="age-settings-input" id="setting-modal-height"
+                    <input type="number" class="age-settings-numberinput" id="setting-modal-height"
                            value="${userSettings.modalHeight}" min="300" max="2000">
                 </div>
             </div>
