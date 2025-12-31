@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.59
+// @version      1.61
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -4895,6 +4895,1045 @@ function getCacheStatistics() {
 }
 
 // ============================================================================
+// POST FREQUENCY ANALYSIS - NEW FEATURE
+// ============================================================================
+// Insert this section after the "PAGINATION SUPPORT" section
+
+// Fetch user posting frequency data
+function searchUserFrequency(username, kind = 'comment') {
+    return new Promise((resolve, reject) => {
+        if (!apiToken) {
+            reject(new Error('No API token available'));
+            return;
+        }
+
+        const params = new URLSearchParams();
+        params.append('author', username);
+        params.append('exact_author', 'true');
+        params.append('html_decode', 'True');
+        params.append('size', '500');
+        params.append('sort', 'created_utc');
+        params.append('order', 'desc'); // Newest first
+
+        const endpoint = kind === 'comment' ? 'comment' : 'submission';
+        const url = `${PUSHSHIFT_API_BASE}/reddit/search/${endpoint}/?${params}`;
+
+        logDebug(`Frequency request for ${username} (${kind})`);
+
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: url,
+            headers: {
+                'Authorization': `Bearer ${apiToken}`
+            },
+            onload: function(response) {
+                if (response.status === 401 || response.status === 403) {
+                    clearToken();
+                    reject(new Error('Token expired or invalid'));
+                    return;
+                }
+
+                if (response.status !== 200) {
+                    reject(new Error(`PushShift API error: ${response.status}`));
+                    return;
+                }
+
+                try {
+                    const data = JSON.parse(response.responseText);
+                    const results = data.data || [];
+                    logDebug(`Frequency returned ${results.length} ${kind}s`);
+                    resolve(results);
+                } catch (error) {
+                    reject(new Error('Failed to parse API response'));
+                }
+            },
+            onerror: function() {
+                reject(new Error('Network error'));
+            },
+            ontimeout: function() {
+                reject(new Error('Request timed out'));
+            }
+        });
+    });
+}
+
+// Detect consecutive posting streaks
+function detectPostingStreaks(sortedItems, intervals) {
+    if (!intervals || intervals.length === 0) {
+        return [];
+    }
+
+    const streaks = [];
+    let currentStreak = {
+        startIndex: 0,
+        endIndex: 0,
+        posts: 1,
+        intervals: [],
+        totalDuration: 0
+    };
+
+    const RAPID_THRESHOLD = 120; // 2 minutes - posting faster than this = rapid
+    const BREAK_THRESHOLD = 600; // 10 minutes - gap longer than this = streak break
+
+    for (let i = 0; i < intervals.length; i++) {
+        const interval = intervals[i];
+
+        if (interval <= RAPID_THRESHOLD) {
+            // Continue streak
+            currentStreak.endIndex = i + 1;
+            currentStreak.posts++;
+            currentStreak.intervals.push(interval);
+            currentStreak.totalDuration += interval;
+        } else if (interval > BREAK_THRESHOLD) {
+            // Streak broken - save if significant
+            if (currentStreak.posts >= 10) { // At least 10 posts in streak
+                const avgInterval = currentStreak.totalDuration / currentStreak.intervals.length;
+                const durationMinutes = currentStreak.totalDuration / 60;
+
+                streaks.push({
+                    posts: currentStreak.posts,
+                    duration: currentStreak.totalDuration,
+                    durationMinutes: durationMinutes,
+                    avgInterval: avgInterval,
+                    startIndex: currentStreak.startIndex,
+                    endIndex: currentStreak.endIndex,
+                    breakDuration: interval
+                });
+            }
+
+            // Start new streak
+            currentStreak = {
+                startIndex: i + 1,
+                endIndex: i + 1,
+                posts: 1,
+                intervals: [],
+                totalDuration: 0
+            };
+        } else {
+            // Medium-speed posting (2-10 min) - continue streak but don't count as rapid
+            currentStreak.endIndex = i + 1;
+            currentStreak.posts++;
+            currentStreak.intervals.push(interval);
+            currentStreak.totalDuration += interval;
+        }
+    }
+
+    // Check final streak
+    if (currentStreak.posts >= 10) {
+        const avgInterval = currentStreak.intervals.length > 0
+            ? currentStreak.totalDuration / currentStreak.intervals.length
+            : 0;
+        const durationMinutes = currentStreak.totalDuration / 60;
+
+        streaks.push({
+            posts: currentStreak.posts,
+            duration: currentStreak.totalDuration,
+            durationMinutes: durationMinutes,
+            avgInterval: avgInterval,
+            startIndex: currentStreak.startIndex,
+            endIndex: currentStreak.endIndex,
+            breakDuration: null
+        });
+    }
+
+    return streaks;
+}
+
+// Analyze frequency patterns
+function analyzeFrequency(items) {
+    if (!items || items.length === 0) {
+        return null;
+    }
+
+    // Sort by timestamp (newest first)
+    const sorted = [...items].sort((a, b) => b.created_utc - a.created_utc);
+
+    // Calculate intervals (in seconds)
+    const intervals = [];
+    for (let i = 1; i < sorted.length; i++) {
+        intervals.push(sorted[i - 1].created_utc - sorted[i].created_utc);
+    }
+
+    if (intervals.length === 0) {
+        return {
+            count: sorted.length,
+            intervals: [],
+            stats: null,
+            bursts: { within5m: 0, within15m: 0, within1hr: 0 },
+            timePatterns: { hourly: [], daily: [] },
+            suspiciousPatterns: [],
+            subredditDist: {}
+        };
+    }
+
+    // Basic statistics
+    const mean = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+    const sortedIntervals = [...intervals].sort((a, b) => a - b);
+    const median = sortedIntervals[Math.floor(sortedIntervals.length / 2)];
+    const variance = intervals.reduce((sum, interval) => sum + Math.pow(interval - mean, 2), 0) / intervals.length;
+    const stdDev = Math.sqrt(variance);
+    const coefficientOfVariation = stdDev / mean;
+
+    // Regularity score (0-100, higher = more regular/bot-like)
+    const regularityScore = Math.max(0, Math.min(100, 100 * (1 - Math.min(coefficientOfVariation, 1))));
+
+    // Burst detection (exclusive buckets with finer granularity)
+    const within10s = intervals.filter(i => i <= 10).length;
+    const within30s = intervals.filter(i => i > 10 && i <= 30).length;
+    const within60s = intervals.filter(i => i > 30 && i <= 60).length;
+    const within5m = intervals.filter(i => i > 60 && i <= 300).length;
+    const within15m = intervals.filter(i => i > 300 && i <= 900).length;
+    const within1hr = intervals.filter(i => i > 900 && i <= 3600).length;
+
+    const bursts = {
+        within10s: within10s,
+        within30s: within30s,
+        within60s: within60s,
+        within5m: within5m,
+        between5and15m: within15m,
+        between15mand1hr: within1hr,
+        total10s: within10s,
+        total30s: within10s + within30s,
+        total60s: within10s + within30s + within60s,
+        total5m: within10s + within30s + within60s + within5m,
+        total15m: within10s + within30s + within60s + within5m + within15m,
+        total1hr: within10s + within30s + within60s + within5m + within15m + within1hr
+    };
+
+    // Time patterns (hour of day, day of week)
+    const hourly = new Array(24).fill(0);
+    const daily = new Array(7).fill(0);
+    sorted.forEach(item => {
+        const date = new Date(item.created_utc * 1000);
+        hourly[date.getUTCHours()]++;
+        daily[date.getUTCDay()]++;
+    });
+
+    // Detect consecutive posting streaks
+    const streaks = detectPostingStreaks(sorted, intervals);
+
+    // Suspicious patterns
+    const suspiciousPatterns = [];
+
+    // Check for interval clustering (many posts within tight range)
+    const clusterRanges = [
+        { min: 0, max: 15, label: '0-15s' },
+        { min: 15, max: 30, label: '15-30s' },
+        { min: 30, max: 60, label: '30-60s' },
+        { min: 60, max: 120, label: '1-2m' }
+    ];
+
+    clusterRanges.forEach(range => {
+        const count = intervals.filter(i => i >= range.min && i < range.max).length;
+        const percentage = (count / intervals.length) * 100;
+
+        // Lower threshold: flag if 20+ posts OR 5%+ of total
+        if (count >= 20 && percentage >= 5) {
+            suspiciousPatterns.push({
+                type: 'interval_clustering',
+                description: `${count} posts clustered in ${range.label} range (${percentage.toFixed(1)}%)`,
+                severity: percentage >= 30 ? 'high' : percentage >= 15 ? 'medium' : 'low'
+            });
+        }
+    });
+
+    // Check for very high burst percentage
+    const rapidBurstPct = ((within10s + within30s + within60s) / intervals.length) * 100;
+    if (rapidBurstPct >= 50) {
+        suspiciousPatterns.push({
+            type: 'extreme_bursting',
+            description: `${rapidBurstPct.toFixed(1)}% of posts within 60 seconds of previous post`,
+            severity: rapidBurstPct >= 70 ? 'high' : 'medium'
+        });
+    }
+
+    // Check for marathon streaks
+    const marathonStreaks = streaks.filter(s => s.posts >= 50 || s.durationMinutes >= 60);
+    if (marathonStreaks.length > 0) {
+        const longest = marathonStreaks.reduce((max, s) => s.posts > max.posts ? s : max);
+        suspiciousPatterns.push({
+            type: 'marathon_posting',
+            description: `Marathon streak: ${longest.posts} posts over ${longest.durationMinutes.toFixed(0)} minutes (avg ${longest.avgInterval.toFixed(0)}s apart)`,
+            severity: longest.posts >= 100 ? 'high' : 'medium'
+        });
+    }
+
+    // Check for exact interval repetition
+    const intervalCounts = {};
+    intervals.forEach(interval => {
+        // For intervals < 60s, don't round (keep exact seconds)
+        // For intervals >= 60s, round to nearest 10 seconds
+        let rounded;
+        if (interval < 60) {
+            rounded = Math.round(interval); // Keep exact seconds
+        } else {
+            rounded = Math.round(interval / 10) * 10; // Round to nearest 10s
+        }
+        intervalCounts[rounded] = (intervalCounts[rounded] || 0) + 1;
+    });
+
+    Object.keys(intervalCounts).forEach(interval => {
+        const count = intervalCounts[interval];
+        const percentage = (count / intervals.length) * 100;
+        if (count >= 5 && percentage >= 10) {
+            const intVal = parseInt(interval);
+            let displayInterval;
+
+            if (intVal < 60) {
+                displayInterval = `${intVal}s`;
+            } else if (intVal < 3600) {
+                const mins = Math.floor(intVal / 60);
+                const secs = intVal % 60;
+                displayInterval = secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
+            } else {
+                displayInterval = `${(intVal / 3600).toFixed(1)}h`;
+            }
+
+            suspiciousPatterns.push({
+                type: 'exact_interval',
+                description: `${count} posts at ~${displayInterval} intervals (${percentage.toFixed(1)}%)`,
+                severity: percentage >= 30 ? 'high' : percentage >= 20 ? 'medium' : 'low'
+            });
+        }
+    });
+
+    // Check for no sleep hours (2am-7am UTC)
+    const sleepHours = hourly.slice(2, 7);
+    const sleepTotal = sleepHours.reduce((a, b) => a + b, 0);
+    const sleepPercentage = (sleepTotal / sorted.length) * 100;
+    if (sleepPercentage < 5 && sorted.length >= 50) {
+        suspiciousPatterns.push({
+            type: 'no_sleep',
+            description: `Only ${sleepPercentage.toFixed(1)}% of posts during 2am-7am UTC (sleep hours)`,
+            severity: sleepPercentage < 2 ? 'high' : 'medium'
+        });
+    }
+
+    // Subreddit distribution
+    const subredditDist = {};
+    sorted.forEach(item => {
+        const sub = item.subreddit || 'unknown';
+        subredditDist[sub] = (subredditDist[sub] || 0) + 1;
+    });
+
+    // Sort subreddits by frequency
+    const sortedSubs = Object.entries(subredditDist)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 20); // Top 20
+
+    // Time span
+    const timeSpan = sorted[0].created_utc - sorted[sorted.length - 1].created_utc;
+    const timeSpanDays = timeSpan / (24 * 60 * 60);
+
+    return {
+        count: sorted.length,
+        intervals: intervals,
+        timeSpan: timeSpan,
+        timeSpanDays: timeSpanDays,
+        stats: {
+            mean: mean,
+            median: median,
+            stdDev: stdDev,
+            min: Math.min(...intervals),
+            max: Math.max(...intervals),
+            coefficientOfVariation: coefficientOfVariation,
+            regularityScore: regularityScore
+        },
+        bursts: bursts,
+        streaks: streaks,
+        timePatterns: {
+            hourly: hourly,
+            daily: daily
+        },
+        suspiciousPatterns: suspiciousPatterns,
+        subredditDist: sortedSubs
+    };
+}
+
+// Build frequency modal sections
+function buildFrequencyOverview(analysis, kind) {
+    if (!analysis) {
+        return `<p style="color: var(--av-text-muted);">No ${kind}s found.</p>`;
+    }
+
+    const kindLabel = kind === 'comment' ? 'Comments' : 'Posts';
+
+    return `
+        <div class="analysis-stat-row">
+            <span class="analysis-stat-label">Total ${kindLabel}</span>
+            <span class="analysis-stat-value">${analysis.count}</span>
+        </div>
+        <div class="analysis-stat-row">
+            <span class="analysis-stat-label">Time Span</span>
+            <span class="analysis-stat-value">${analysis.timeSpanDays.toFixed(1)} days</span>
+        </div>
+        ${analysis.stats ? `
+        <div class="analysis-stat-row">
+            <span class="analysis-stat-label">Mean Interval</span>
+            <span class="analysis-stat-value">${formatDuration(analysis.stats.mean)}</span>
+        </div>
+        <div class="analysis-stat-row">
+            <span class="analysis-stat-label">Median Interval</span>
+            <span class="analysis-stat-value">${formatDuration(analysis.stats.median)}</span>
+        </div>
+        <div class="analysis-stat-row">
+            <span class="analysis-stat-label">Std Deviation</span>
+            <span class="analysis-stat-value">${formatDuration(analysis.stats.stdDev)}</span>
+        </div>
+        <div class="analysis-stat-row">
+            <span class="analysis-stat-label">Regularity Score</span>
+            <span class="analysis-stat-value ${
+                analysis.stats.regularityScore >= 70 ? 'warning' :
+                analysis.stats.regularityScore >= 50 ? 'info' : 'success'
+            }">${analysis.stats.regularityScore.toFixed(0)}/100 ${
+                analysis.stats.regularityScore >= 70 ? '⚠️ Bot-like' : ''
+            }</span>
+        </div>
+        ` : ''}
+    `;
+}
+
+function buildFrequencyBursts(analysis) {
+    if (!analysis || !analysis.bursts) {
+        return '';
+    }
+
+    const pct10s = analysis.intervals.length > 0
+        ? ((analysis.bursts.within10s / analysis.intervals.length) * 100).toFixed(1) : '0.0';
+    const pct30s = analysis.intervals.length > 0
+        ? ((analysis.bursts.within30s / analysis.intervals.length) * 100).toFixed(1) : '0.0';
+    const pct60s = analysis.intervals.length > 0
+        ? ((analysis.bursts.within60s / analysis.intervals.length) * 100).toFixed(1) : '0.0';
+    const pct5m = analysis.intervals.length > 0
+        ? ((analysis.bursts.within5m / analysis.intervals.length) * 100).toFixed(1) : '0.0';
+    const pct15m = analysis.intervals.length > 0
+        ? ((analysis.bursts.between5and15m / analysis.intervals.length) * 100).toFixed(1) : '0.0';
+    const pct1hr = analysis.intervals.length > 0
+        ? ((analysis.bursts.between15mand1hr / analysis.intervals.length) * 100).toFixed(1) : '0.0';
+
+    // Highlight dangerous levels
+    const danger10s = analysis.bursts.within10s > 50;
+    const danger30s = analysis.bursts.total30s > 100;
+    const danger60s = analysis.bursts.total60s > 200;
+
+    return `
+        <div style="margin-bottom: 15px;">
+            <div style="font-weight: bold; margin-bottom: 8px; color: var(--av-text);">Seconds-Level Bursts (Bot Indicators)</div>
+            <div class="analysis-stat-row">
+                <span class="analysis-stat-label">≤ 10 seconds apart</span>
+                <span class="analysis-stat-value ${danger10s ? 'danger' : ''}">${analysis.bursts.within10s} (${pct10s}%)${danger10s ? ' ⚠️' : ''}</span>
+            </div>
+            <div class="analysis-stat-row">
+                <span class="analysis-stat-label">10-30 seconds apart</span>
+                <span class="analysis-stat-value ${danger30s ? 'warning' : ''}">${analysis.bursts.within30s} (${pct30s}%)${danger30s && !danger10s ? ' ⚠️' : ''}</span>
+            </div>
+            <div class="analysis-stat-row">
+                <span class="analysis-stat-label">30-60 seconds apart</span>
+                <span class="analysis-stat-value ${danger60s ? 'warning' : ''}">${analysis.bursts.within60s} (${pct60s}%)${danger60s && !danger30s ? ' ⚠️' : ''}</span>
+            </div>
+            <div class="analysis-stat-row" style="border-top: 1px solid var(--av-border); margin-top: 4px; padding-top: 4px;">
+                <span class="analysis-stat-label">Total ≤ 60 seconds</span>
+                <span class="analysis-stat-value ${danger60s ? 'danger' : 'info'}">${analysis.bursts.total60s} (${((analysis.bursts.total60s / analysis.intervals.length) * 100).toFixed(1)}%)</span>
+            </div>
+        </div>
+
+        <div style="margin-bottom: 15px;">
+            <div style="font-weight: bold; margin-bottom: 8px; color: var(--av-text);">Minute-Level Bursts</div>
+            <div class="analysis-stat-row">
+                <span class="analysis-stat-label">1-5 minutes apart</span>
+                <span class="analysis-stat-value">${analysis.bursts.within5m} (${pct5m}%)</span>
+            </div>
+            <div class="analysis-stat-row">
+                <span class="analysis-stat-label">5-15 minutes apart</span>
+                <span class="analysis-stat-value">${analysis.bursts.between5and15m} (${pct15m}%)</span>
+            </div>
+            <div class="analysis-stat-row">
+                <span class="analysis-stat-label">15-60 minutes apart</span>
+                <span class="analysis-stat-value">${analysis.bursts.between15mand1hr} (${pct1hr}%)</span>
+            </div>
+            <div class="analysis-stat-row" style="border-top: 1px solid var(--av-border); margin-top: 4px; padding-top: 4px;">
+                <span class="analysis-stat-label">Total ≤ 1 hour</span>
+                <span class="analysis-stat-value info">${analysis.bursts.total1hr} (${((analysis.bursts.total1hr / analysis.intervals.length) * 100).toFixed(1)}%)</span>
+            </div>
+        </div>
+    `;
+}
+
+function buildFrequencyTimePatterns(analysis) {
+    if (!analysis || !analysis.timePatterns) {
+        return '';
+    }
+
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const maxHourly = Math.max(...analysis.timePatterns.hourly);
+    const maxDaily = Math.max(...analysis.timePatterns.daily);
+
+    // Find peak hours
+    const peakHour = analysis.timePatterns.hourly.indexOf(maxHourly);
+    const peakDay = analysis.timePatterns.daily.indexOf(maxDaily);
+
+    // Simple bar chart using unicode blocks
+    const hourlyBars = analysis.timePatterns.hourly.map((count, hour) => {
+        const barLength = maxHourly > 0 ? Math.round((count / maxHourly) * 20) : 0;
+        const bar = '█'.repeat(barLength) + '░'.repeat(20 - barLength);
+        const percentage = analysis.count > 0 ? ((count / analysis.count) * 100).toFixed(1) : '0.0';
+        return `<div style="font-family: monospace; font-size: 11px; line-height: 1.4;">
+            ${hour.toString().padStart(2, '0')}:00 ${bar} ${count.toString().padStart(4)} (${percentage}%)
+        </div>`;
+    }).join('');
+
+    const dailyBars = analysis.timePatterns.daily.map((count, day) => {
+        const barLength = maxDaily > 0 ? Math.round((count / maxDaily) * 20) : 0;
+        const bar = '█'.repeat(barLength) + '░'.repeat(20 - barLength);
+        const percentage = analysis.count > 0 ? ((count / analysis.count) * 100).toFixed(1) : '0.0';
+        return `<div style="font-family: monospace; font-size: 11px; line-height: 1.4;">
+            ${days[day]} ${bar} ${count.toString().padStart(4)} (${percentage}%)
+        </div>`;
+    }).join('');
+
+    return `
+        <div style="margin-bottom: 20px;">
+            <div style="font-weight: bold; margin-bottom: 8px;">Peak Activity</div>
+            <div class="analysis-stat-row">
+                <span class="analysis-stat-label">Peak Hour</span>
+                <span class="analysis-stat-value info">${peakHour}:00 UTC (${maxHourly} posts)</span>
+            </div>
+            <div class="analysis-stat-row">
+                <span class="analysis-stat-label">Peak Day</span>
+                <span class="analysis-stat-value info">${days[peakDay]} (${maxDaily} posts)</span>
+            </div>
+        </div>
+
+        <div style="margin-bottom: 15px;">
+            <div style="font-weight: bold; margin-bottom: 8px;">Posts by Hour (UTC)</div>
+            ${hourlyBars}
+        </div>
+
+        <div>
+            <div style="font-weight: bold; margin-bottom: 8px;">Posts by Day of Week</div>
+            ${dailyBars}
+        </div>
+    `;
+}
+
+function buildFrequencyStreaks(analysis) {
+    if (!analysis || !analysis.streaks || analysis.streaks.length === 0) {
+        return '<p style="color: var(--av-success);">✓ No extended rapid-posting marathons detected.</p>';
+    }
+
+    const streaksHTML = analysis.streaks.map((streak, idx) => {
+        const durationHours = (streak.durationMinutes / 60).toFixed(1);
+        const durationDisplay = streak.durationMinutes < 60
+            ? `${streak.durationMinutes.toFixed(0)} minutes`
+            : `${durationHours} hours`;
+
+        const postsPerHour = (streak.posts / (streak.durationMinutes / 60)).toFixed(0);
+
+        // Severity based on posts and speed
+        let severity = 'info';
+        let severityLabel = 'Normal';
+        if (streak.posts >= 100 || postsPerHour >= 100) {
+            severity = 'danger';
+            severityLabel = 'EXTREME';
+        } else if (streak.posts >= 50 || postsPerHour >= 50) {
+            severity = 'warning';
+            severityLabel = 'High';
+        }
+
+        return `
+            <div style="background-color: var(--av-analysis-header); padding: 12px; border-radius: 4px; margin-bottom: 10px; border-left: 3px solid var(--av-${severity === 'danger' ? 'danger' : severity === 'warning' ? 'warning' : 'primary'});">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                    <span style="font-weight: bold; color: var(--av-text);">Streak #${idx + 1}</span>
+                    <span style="color: var(--av-${severity === 'danger' ? 'danger' : severity === 'warning' ? 'warning' : 'success'}); font-weight: bold;">${severityLabel}</span>
+                </div>
+                <div class="analysis-stat-row" style="border: none; padding: 4px 0;">
+                    <span class="analysis-stat-label">Posts in Streak</span>
+                    <span class="analysis-stat-value">${streak.posts}</span>
+                </div>
+                <div class="analysis-stat-row" style="border: none; padding: 4px 0;">
+                    <span class="analysis-stat-label">Duration</span>
+                    <span class="analysis-stat-value">${durationDisplay}</span>
+                </div>
+                <div class="analysis-stat-row" style="border: none; padding: 4px 0;">
+                    <span class="analysis-stat-label">Avg Interval</span>
+                    <span class="analysis-stat-value">${streak.avgInterval.toFixed(0)}s</span>
+                </div>
+                <div class="analysis-stat-row" style="border: none; padding: 4px 0;">
+                    <span class="analysis-stat-label">Posts/Hour</span>
+                    <span class="analysis-stat-value ${severity}">${postsPerHour}</span>
+                </div>
+                ${streak.breakDuration ? `
+                <div class="analysis-stat-row" style="border: none; padding: 4px 0;">
+                    <span class="analysis-stat-label">Break After</span>
+                    <span class="analysis-stat-value">${formatDuration(streak.breakDuration)}</span>
+                </div>
+                ` : ''}
+            </div>
+        `;
+    }).join('');
+
+    const totalStreakPosts = analysis.streaks.reduce((sum, s) => sum + s.posts, 0);
+    const streakPercentage = ((totalStreakPosts / analysis.count) * 100).toFixed(1);
+
+    return `
+        <div style="margin-bottom: 15px; padding: 10px; background-color: var(--av-anomaly-bg); border-radius: 4px;">
+            <strong style="color: #ff6b6b;">⚠️ ${analysis.streaks.length} rapid-posting marathon${analysis.streaks.length > 1 ? 's' : ''} detected</strong>
+            <div style="color: var(--av-text-muted); font-size: 12px; margin-top: 4px;">
+                ${totalStreakPosts} posts (${streakPercentage}%) were made during marathon sessions
+            </div>
+        </div>
+        ${streaksHTML}
+    `;
+}
+
+function buildFrequencySuspicious(analysis) {
+    if (!analysis || !analysis.suspiciousPatterns || analysis.suspiciousPatterns.length === 0) {
+        return '<p style="color: var(--av-success);">✓ No obvious suspicious patterns detected.</p>';
+    }
+
+    const patternsHTML = analysis.suspiciousPatterns.map(pattern => {
+        const severityColors = {
+            high: '#ff6b6b',
+            medium: 'var(--av-warning)',
+            low: '#ffa500'
+        };
+
+        return `
+            <div class="anomaly-item" style="border-left-color: ${severityColors[pattern.severity]};">
+                <div class="anomaly-description" style="color: ${severityColors[pattern.severity]};">
+                    <strong>${pattern.severity.toUpperCase()}:</strong> ${pattern.description}
+                </div>
+                <div class="anomaly-date" style="font-size: 11px;">
+                    Type: ${pattern.type}
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    return patternsHTML;
+}
+
+function buildFrequencySubreddits(analysis) {
+    if (!analysis || !analysis.subredditDist || analysis.subredditDist.length === 0) {
+        return '<p style="color: var(--av-text-muted);">No subreddit data available.</p>';
+    }
+
+    const maxCount = analysis.subredditDist[0][1];
+    const maxSubLength = 30; // Fixed width for subreddit names
+
+    const subsHTML = analysis.subredditDist.map(([sub, count]) => {
+        const barLength = maxCount > 0 ? Math.round((count / maxCount) * 30) : 0;
+        const bar = '█'.repeat(barLength) + '░'.repeat(30 - barLength);
+        const percentage = analysis.count > 0 ? ((count / analysis.count) * 100).toFixed(1) : '0.0';
+
+        // Truncate or pad subreddit name to fixed width
+        const displaySub = sub.length > maxSubLength
+            ? sub.substring(0, maxSubLength - 3) + '...'
+            : sub.padEnd(maxSubLength);
+
+        return `<div style="font-family: monospace; font-size: 11px; line-height: 1.4; margin-bottom: 2px;">
+            <a href="https://old.reddit.com/r/${sub}" target="_blank" style="color: var(--av-link); text-decoration: none; display: inline-block; width: ${maxSubLength}ch;">r/${displaySub}</a> ${bar} ${count.toString().padStart(4)} (${percentage.padStart(5)}%)
+        </div>`;
+    }).join('');
+
+    return subsHTML;
+}
+
+function buildFrequencyRawOutput(items, kind) {
+    if (!items || items.length === 0) {
+        return '<p style="color: var(--av-text-muted);">No data available.</p>';
+    }
+
+    // Sort newest first
+    const sorted = [...items].sort((a, b) => b.created_utc - a.created_utc);
+
+    const rows = sorted.map((item, index) => {
+        let delta = '';
+        if (index > 0) {
+            const secondsDelta = sorted[index - 1].created_utc - item.created_utc;
+            delta = secondsDelta.toString().padStart(10);
+        } else {
+            delta = ''.padStart(10);
+        }
+
+        const date = new Date(item.created_utc * 1000);
+        const timestamp = date.toISOString().replace('T', ' ').substring(0, 19);
+
+        const id = item.id || '';
+        const permalink = kind === 'comment'
+            ? `https://reddit.com${item.permalink}`
+            : `https://reddit.com${item.permalink}`;
+
+        const subreddit = item.subreddit || '';
+
+        return `${delta} ${id.padEnd(10)} ${timestamp} /r/${subreddit}/${kind}s/${id}/`;
+    }).join('\n');
+
+    return `<pre style="font-family: 'Courier New', monospace; font-size: 11px; line-height: 1.3; overflow-x: auto; background-color: var(--av-analysis-header); padding: 15px; border-radius: 4px;">${rows}</pre>`;
+}
+
+function formatDuration(seconds) {
+    if (seconds < 60) {
+        return `${seconds.toFixed(0)}s`;
+    } else if (seconds < 3600) {
+        return `${(seconds / 60).toFixed(1)}m`;
+    } else if (seconds < 86400) {
+        return `${(seconds / 3600).toFixed(1)}h`;
+    } else {
+        return `${(seconds / 86400).toFixed(1)}d`;
+    }
+}
+
+// Show frequency modal
+async function showFrequencyModal(username) {
+    // Check for token
+    if (!apiToken) {
+        attemptAutoFetchToken();
+        showTokenModal(username);
+        return;
+    }
+
+    const modalId = `age-modal-${modalCounter++}`;
+
+    const modal = document.createElement('div');
+    modal.className = 'age-modal resizable';
+    modal.dataset.modalId = modalId;
+    modal.dataset.username = username;
+    modal.style.width = '900px';
+    modal.style.height = '90vh';
+    modal.style.zIndex = ++zIndexCounter;
+
+    modal.innerHTML = `
+        <div class="age-modal-header">
+            <div class="age-modal-title-row">
+                <div class="age-modal-title">Post Frequency: u/${username}</div>
+                <button class="age-modal-close">&times;</button>
+            </div>
+        </div>
+        <div class="age-modal-content">
+            <div class="age-loading">Fetching posting frequency data...</div>
+        </div>
+        <div class="age-modal-buttons">
+            <button class="age-modal-button" id="freq-fetch-more">Fetch More (500 each)</button>
+            <button class="age-modal-button secondary">Close</button>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    makeDraggable(modal);
+    modal.addEventListener('mousedown', () => {
+        bringToFront(modal);
+        normalizeModalPosition(modal);
+    });
+
+    resultsModals.push({ modalId, modal, overlay: null, username });
+
+    const closeBtn = modal.querySelector('.age-modal-close');
+    const closeButton = modal.querySelector('.age-modal-buttons .secondary');
+    const fetchMoreBtn = modal.querySelector('#freq-fetch-more');
+
+    const closeModal = () => {
+        document.body.removeChild(modal);
+        resultsModals = resultsModals.filter(m => m.modalId !== modalId);
+    };
+
+    closeBtn.onclick = closeModal;
+    closeButton.onclick = closeModal;
+
+    // Store data for fetch more
+    let allComments = [];
+    let allSubmissions = [];
+
+    const updateDisplay = (comments, submissions) => {
+        const commentAnalysis = analyzeFrequency(comments);
+        const submissionAnalysis = analyzeFrequency(submissions);
+
+        const content = modal.querySelector('.age-modal-content');
+        const currentView = content.querySelector('[id^="freq-"][style*="block"]')?.id || 'freq-comments-view';
+
+        content.innerHTML = `
+            <div style="margin-bottom: 15px; display: flex; gap: 10px;">
+                <button class="age-modal-button" id="freq-toggle-comments" data-active="${currentView === 'freq-comments-view'}" style="flex: 1;">
+                    Comments (${comments.length})
+                </button>
+                <button class="age-modal-button ${currentView === 'freq-comments-view' ? 'secondary' : ''}" id="freq-toggle-posts" data-active="${currentView === 'freq-posts-view'}" style="flex: 1;">
+                    Posts (${submissions.length})
+                </button>
+            </div>
+
+            <div id="freq-comments-view" style="display: ${currentView === 'freq-comments-view' ? 'block' : 'none'};">
+                ${buildFrequencyView(commentAnalysis, comments, 'comment', username)}
+            </div>
+
+            <div id="freq-posts-view" style="display: ${currentView === 'freq-posts-view' ? 'block' : 'none'};">
+                ${buildFrequencyView(submissionAnalysis, submissions, 'submission', username)}
+            </div>
+        `;
+
+        // Re-attach toggle handlers
+        const commentsBtn = modal.querySelector('#freq-toggle-comments');
+        const postsBtn = modal.querySelector('#freq-toggle-posts');
+        const commentsView = modal.querySelector('#freq-comments-view');
+        const postsView = modal.querySelector('#freq-posts-view');
+
+        commentsBtn.onclick = () => {
+            commentsBtn.classList.remove('secondary');
+            commentsBtn.dataset.active = 'true';
+            postsBtn.classList.add('secondary');
+            postsBtn.dataset.active = 'false';
+            commentsView.style.display = 'block';
+            postsView.style.display = 'none';
+        };
+
+        postsBtn.onclick = () => {
+            postsBtn.classList.remove('secondary');
+            postsBtn.dataset.active = 'true';
+            commentsBtn.classList.add('secondary');
+            commentsBtn.dataset.active = 'false';
+            postsView.style.display = 'block';
+            commentsView.style.display = 'none';
+        };
+
+        attachFrequencyHandlers(modal);
+    };
+
+    // Fetch More handler
+    fetchMoreBtn.onclick = async () => {
+        fetchMoreBtn.disabled = true;
+        fetchMoreBtn.textContent = 'Fetching...';
+
+        try {
+            // Get oldest timestamp from current data
+            const oldestComment = allComments.length > 0
+                ? Math.min(...allComments.map(c => c.created_utc))
+                : null;
+            const oldestSubmission = allSubmissions.length > 0
+                ? Math.min(...allSubmissions.map(s => s.created_utc))
+                : null;
+
+            // Fetch more with before parameter
+            const [newComments, newSubmissions] = await Promise.all([
+                searchUserFrequencyPaginated(username, 'comment', oldestComment),
+                searchUserFrequencyPaginated(username, 'submission', oldestSubmission)
+            ]);
+
+            // Merge and deduplicate
+            const commentIds = new Set(allComments.map(c => c.id));
+            const submissionIds = new Set(allSubmissions.map(s => s.id));
+
+            newComments.forEach(c => {
+                if (!commentIds.has(c.id)) {
+                    allComments.push(c);
+                    commentIds.add(c.id);
+                }
+            });
+
+            newSubmissions.forEach(s => {
+                if (!submissionIds.has(s.id)) {
+                    allSubmissions.push(s);
+                    submissionIds.add(s.id);
+                }
+            });
+
+            updateDisplay(allComments, allSubmissions);
+
+            fetchMoreBtn.disabled = false;
+            fetchMoreBtn.textContent = `Fetch More (500 each)`;
+
+            if (newComments.length === 0 && newSubmissions.length === 0) {
+                fetchMoreBtn.textContent = 'No More Data Available';
+                fetchMoreBtn.disabled = true;
+            }
+
+        } catch (error) {
+            console.error('Fetch more error:', error);
+            fetchMoreBtn.textContent = `Error: ${error.message}`;
+        }
+    };
+
+    try {
+        // Initial fetch
+        const [comments, submissions] = await Promise.all([
+            searchUserFrequency(username, 'comment'),
+            searchUserFrequency(username, 'submission')
+        ]);
+
+        allComments = comments;
+        allSubmissions = submissions;
+
+        updateDisplay(comments, submissions);
+
+    } catch (error) {
+        console.error('Frequency fetch error:', error);
+        const content = modal.querySelector('.age-modal-content');
+        content.innerHTML = `
+            <div class="age-error">
+                <strong>Error:</strong> ${error.message}
+            </div>
+        `;
+
+        if (error.message.includes('token') || error.message.includes('Token')) {
+            setTimeout(() => {
+                closeModal();
+                showTokenModal(username);
+            }, 2000);
+        }
+    }
+}
+
+// Fetch with pagination support
+function searchUserFrequencyPaginated(username, kind = 'comment', beforeTimestamp = null) {
+    return new Promise((resolve, reject) => {
+        if (!apiToken) {
+            reject(new Error('No API token available'));
+            return;
+        }
+
+        const params = new URLSearchParams();
+        params.append('author', username);
+        params.append('exact_author', 'true');
+        params.append('html_decode', 'True');
+        params.append('size', '500');
+        params.append('sort', 'created_utc');
+        params.append('order', 'desc');
+
+        if (beforeTimestamp) {
+            params.append('before', beforeTimestamp.toString());
+        }
+
+        const endpoint = kind === 'comment' ? 'comment' : 'submission';
+        const url = `${PUSHSHIFT_API_BASE}/reddit/search/${endpoint}/?${params}`;
+
+        logDebug(`Frequency pagination request for ${username} (${kind}, before: ${beforeTimestamp})`);
+
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: url,
+            headers: {
+                'Authorization': `Bearer ${apiToken}`
+            },
+            onload: function(response) {
+                if (response.status === 401 || response.status === 403) {
+                    clearToken();
+                    reject(new Error('Token expired or invalid'));
+                    return;
+                }
+
+                if (response.status !== 200) {
+                    reject(new Error(`PushShift API error: ${response.status}`));
+                    return;
+                }
+
+                try {
+                    const data = JSON.parse(response.responseText);
+                    const results = data.data || [];
+                    logDebug(`Frequency pagination returned ${results.length} ${kind}s`);
+                    resolve(results);
+                } catch (error) {
+                    reject(new Error('Failed to parse API response'));
+                }
+            },
+            onerror: function() {
+                reject(new Error('Network error'));
+            },
+            ontimeout: function() {
+                reject(new Error('Request timed out'));
+            }
+        });
+    });
+}
+
+function buildFrequencyView(analysis, items, kind, username) {
+    const kindLabel = kind === 'comment' ? 'Comments' : 'Posts';
+
+    return `
+        <div class="deep-analysis-section">
+            <div class="deep-analysis-header">
+                <span class="deep-analysis-title">📊 Overview</span>
+                <span class="deep-analysis-toggle">▼ Hide</span>
+            </div>
+            <div class="deep-analysis-content">
+                ${buildFrequencyOverview(analysis, kind)}
+            </div>
+        </div>
+
+        ${analysis && analysis.stats ? `
+        <div class="deep-analysis-section">
+            <div class="deep-analysis-header">
+                <span class="deep-analysis-title">💥 Burst Activity</span>
+                <span class="deep-analysis-toggle">▼ Hide</span>
+            </div>
+            <div class="deep-analysis-content">
+                ${buildFrequencyBursts(analysis)}
+            </div>
+        </div>
+
+        <div class="deep-analysis-section">
+            <div class="deep-analysis-header">
+                <span class="deep-analysis-title">🕐 Time Patterns</span>
+                <span class="deep-analysis-toggle">▼ Hide</span>
+            </div>
+            <div class="deep-analysis-content">
+                ${buildFrequencyTimePatterns(analysis)}
+            </div>
+        </div>
+
+        <div class="deep-analysis-section">
+            <div class="deep-analysis-header">
+                <span class="deep-analysis-title">🔥 Posting Streaks</span>
+                <span class="deep-analysis-toggle">▼ Hide</span>
+            </div>
+            <div class="deep-analysis-content">
+                ${buildFrequencyStreaks(analysis)}
+            </div>
+        </div>
+
+        <div class="deep-analysis-section">
+            <div class="deep-analysis-header">
+                <span class="deep-analysis-title">⚠️ Suspicious Patterns</span>
+                <span class="deep-analysis-toggle">▼ Hide</span>
+            </div>
+            <div class="deep-analysis-content">
+                ${buildFrequencySuspicious(analysis)}
+            </div>
+        </div>
+
+        <div class="deep-analysis-section">
+            <div class="deep-analysis-header">
+                <span class="deep-analysis-title">📍 Subreddit Distribution</span>
+                <span class="deep-analysis-toggle">▼ Hide</span>
+            </div>
+            <div class="deep-analysis-content">
+                ${buildFrequencySubreddits(analysis)}
+            </div>
+        </div>
+        ` : ''}
+
+        <div class="deep-analysis-section">
+            <div class="deep-analysis-header">
+                <span class="deep-analysis-title">📋 Raw Output (${items.length} ${kindLabel})</span>
+                <span class="deep-analysis-toggle">▼ Hide</span>
+            </div>
+            <div class="deep-analysis-content" style="max-height: 600px; overflow-y: auto;">
+                ${buildFrequencyRawOutput(items, kind)}
+            </div>
+        </div>
+    `;
+}
+
+function attachFrequencyHandlers(modal) {
+    modal.querySelectorAll('.deep-analysis-header').forEach(header => {
+        header.addEventListener('click', () => {
+            const content = header.nextElementSibling;
+            const toggle = header.querySelector('.deep-analysis-toggle');
+            content.classList.toggle('collapsed');
+            toggle.textContent = content.classList.contains('collapsed') ? '▶ Show' : '▼ Hide';
+        });
+    });
+}
+
+// ============================================================================
 // PAGINATION SUPPORT
 // ============================================================================
 
@@ -5865,6 +6904,7 @@ function showResultsModal(username, ageData) {
             ${resultsHTML}
         </div>
         <div class="age-modal-buttons">
+            <button class="age-modal-button post-frequency">Post Frequency</button>
             <button class="age-modal-button deep-analysis">Deep Analysis</button>
             <button class="age-modal-button recheck-age">Recheck Age</button>
             <button class="age-modal-button danger clear-user">Clear This User Cache</button>
@@ -5894,16 +6934,6 @@ function showResultsModal(username, ageData) {
     // Store modal reference
     resultsModals.push({ modalId, modal, overlay, username });
 
-    const closeBtn = modal.querySelector('.age-modal-close');
-    const closeButton = modal.querySelector('.age-modal-buttons .age-modal-button.secondary');
-
-    logDebug('Close button (X):', closeBtn);
-    logDebug('Close button (bottom):', closeButton);
-    logDebug('Both buttons found:', closeBtn !== null && closeButton !== null);
-
-    const recheckBtn = modal.querySelector('.recheck-age');
-    const clearUserBtn = modal.querySelector('.clear-user');
-    const deepAnalysisBtn = modal.querySelector('.deep-analysis');
     const ageChips = modal.querySelectorAll('.age-chip');
     const resultItems = modal.querySelectorAll('.age-result-item');
     const filterStatusContainer = modal.querySelector('.age-filter-status-container');
@@ -5928,22 +6958,30 @@ function showResultsModal(username, ageData) {
         resultsModals = resultsModals.filter(m => m.modalId !== modalId);
     };
 
+    const closeBtn = modal.querySelector('.age-modal-close');
     closeBtn.addEventListener('click', (e) => {
         console.log('X button clicked');
         closeModal();
     });
 
+    const closeButton = modal.querySelector('.age-modal-buttons .age-modal-button.secondary');
     closeButton.addEventListener('click', (e) => {
         console.log('Bottom close button clicked');
         closeModal();
     });
 
+    logDebug('Close button (X):', closeBtn);
+    logDebug('Close button (bottom):', closeButton);
+    logDebug('Both buttons found:', closeBtn !== null && closeButton !== null);
+
+    const recheckBtn = modal.querySelector('.recheck-age');
     recheckBtn.onclick = () => {
         clearUserCache(username);
         closeModal();
         handleAgeCheck(username);
     };
 
+    const clearUserBtn = modal.querySelector('.clear-user');
     clearUserBtn.onclick = () => {
         if (confirm(`Clear cached data for u/${username}?`)) {
             clearUserCache(username);
@@ -5952,9 +6990,15 @@ function showResultsModal(username, ageData) {
         }
     };
 
+    const deepAnalysisBtn = modal.querySelector('.deep-analysis');
     deepAnalysisBtn.onclick = () => {
         const analysis = performDeepAnalysis(ageData, username);
         showDeepAnalysisModal(username, ageData, analysis);
+    };
+
+    const postFreqBtn = modal.querySelector('.post-frequency');
+    postFreqBtn.onclick = () => {
+        showFrequencyModal(username);
     };
 
     const manualSearchBtn = modal.querySelector('.manual-search');
@@ -7540,6 +8584,10 @@ function showContextMenu(event, username) {
             <span>📊</span>
             <span>Deep Analysis</span>
         </div>
+        <div class="age-context-menu-item" data-action="post-frequency">
+            <span>📊</span>
+            <span>Post Frequency</span>
+        </div>
         <div class="age-context-menu-separator"></div>
         <div class="age-context-menu-item danger" data-action="ignore">
             <span>🚫</span>
@@ -7607,6 +8655,10 @@ function showContextMenu(event, username) {
 
                 case 'deep-analysis':
                     await handleDeepAnalysisQuick(username);
+                    break;
+
+                case 'post-frequency':
+                    await handlePostFrequencyQuick(username);
                     break;
 
                 case 'ignore':
@@ -7677,6 +8729,11 @@ async function handleDeepAnalysisQuick(username) {
         }
     }
 }
+
+async function handlePostFrequencyQuick(username) {
+    showFrequencyModal(username);
+}
+
 
 async function handleCustomButtonClick(buttonId, username, ageData) {
     const btn = userSettings.customButtons.find(b => b.id === buttonId);
