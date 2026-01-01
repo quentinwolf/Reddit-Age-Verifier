@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.61
+// @version      1.62
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -5532,7 +5532,7 @@ function buildFrequencySubreddits(analysis) {
             : sub.padEnd(maxSubLength);
 
         return `<div style="font-family: monospace; font-size: 11px; line-height: 1.4; margin-bottom: 2px;">
-            <a href="https://old.reddit.com/r/${sub}" target="_blank" style="color: var(--av-link); text-decoration: none; display: inline-block; width: ${maxSubLength}ch;">r/${displaySub}</a> ${bar} ${count.toString().padStart(4)} (${percentage.padStart(5)}%)
+            <span class="subreddit-filter-link" data-subreddit="${escapeHtml(sub)}" style="color: var(--av-link); cursor: pointer; text-decoration: none; display: inline-block; width: ${maxSubLength}ch;">r/${displaySub}</span> ${bar} ${count.toString().padStart(4)} (${percentage.padStart(5)}%)
         </div>`;
     }).join('');
 
@@ -5649,6 +5649,13 @@ async function showFrequencyModal(username) {
         const commentAnalysis = analyzeFrequency(comments);
         const submissionAnalysis = analyzeFrequency(submissions);
 
+        // Store references in modal info for subreddit filtering
+        const modalInfo = resultsModals.find(m => m.modalId === modalId);
+        if (modalInfo) {
+            modalInfo.allComments = comments;
+            modalInfo.allSubmissions = submissions;
+        }
+
         const content = modal.querySelector('.age-modal-content');
         const currentView = content.querySelector('[id^="freq-"][style*="block"]')?.id || 'freq-comments-view';
 
@@ -5738,6 +5745,9 @@ async function showFrequencyModal(username) {
 
             updateDisplay(allComments, allSubmissions);
 
+            // Update any open subreddit filter modals
+            refreshSubredditModals(modalId, allComments, allSubmissions);
+
             fetchMoreBtn.disabled = false;
             fetchMoreBtn.textContent = `Fetch More (500 each)`;
 
@@ -5780,6 +5790,180 @@ async function showFrequencyModal(username) {
             }, 2000);
         }
     }
+}
+
+function showSubredditFilteredModal(username, subreddit, allItems, kind, parentModalId) {
+    // Filter items to only this subreddit
+    const filteredItems = allItems.filter(item =>
+        (item.subreddit || '').toLowerCase() === subreddit.toLowerCase()
+    );
+
+    if (filteredItems.length === 0) {
+        return; // Shouldn't happen, but just in case
+    }
+
+    const modalId = `age-modal-${modalCounter++}`;
+    const kindLabel = kind === 'comment' ? 'Comments' : 'Posts';
+
+    const modal = document.createElement('div');
+    modal.className = 'age-modal resizable';
+    modal.dataset.modalId = modalId;
+    modal.dataset.username = username;
+    modal.dataset.subreddit = subreddit;
+    modal.dataset.kind = kind;
+    modal.dataset.parentModalId = parentModalId; // Link to parent frequency modal
+    modal.style.width = '800px';
+    modal.style.height = '80vh';
+    modal.style.zIndex = ++zIndexCounter;
+
+    // Sort newest first by default
+    const sortedItems = [...filteredItems].sort((a, b) => b.created_utc - a.created_utc);
+
+    const resultsHTML = buildSubredditResultsHTML(sortedItems, kind, username);
+
+    modal.innerHTML = `
+        <div class="age-modal-header">
+            <div class="age-modal-title-row">
+                <div class="age-modal-title">${kindLabel} in r/${subreddit} - u/${username} (${filteredItems.length})</div>
+                <button class="age-modal-close">&times;</button>
+            </div>
+            <div style="margin-top: 12px; display: flex; justify-content: flex-end;">
+                <button class="age-modal-button secondary" id="subreddit-toggle-sort">
+                    Sort: Newest First
+                </button>
+            </div>
+        </div>
+        <div class="age-modal-content">
+            ${resultsHTML}
+        </div>
+        <div class="age-modal-buttons">
+            <button class="age-modal-button secondary">Close</button>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    makeDraggable(modal);
+    modal.addEventListener('mousedown', () => {
+        bringToFront(modal);
+        normalizeModalPosition(modal);
+    });
+
+    resultsModals.push({ modalId, modal, overlay: null, username, subreddit, kind, parentModalId });
+
+    const closeBtn = modal.querySelector('.age-modal-close');
+    const closeButton = modal.querySelector('.age-modal-buttons .secondary');
+    const sortButton = modal.querySelector('#subreddit-toggle-sort');
+
+    const closeModal = () => {
+        document.body.removeChild(modal);
+        resultsModals = resultsModals.filter(m => m.modalId !== modalId);
+    };
+
+    closeBtn.onclick = closeModal;
+    closeButton.onclick = closeModal;
+
+    // Sort toggle
+    sortButton.onclick = () => {
+        const container = modal.querySelector('.age-modal-content');
+        const items = Array.from(container.querySelectorAll('.manual-result-item'));
+        items.reverse().forEach(item => container.appendChild(item));
+
+        const currentText = sortButton.textContent;
+        sortButton.textContent = currentText.includes('Newest')
+            ? 'Sort: Oldest First'
+            : 'Sort: Newest First';
+
+        container.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+}
+
+function refreshSubredditModals(parentModalId, allComments, allSubmissions) {
+    // Find all subreddit modals that are children of this frequency modal
+    const subredditModals = resultsModals.filter(m =>
+        m.parentModalId === parentModalId && m.subreddit
+    );
+
+    subredditModals.forEach(modalInfo => {
+        const items = modalInfo.kind === 'comment' ? allComments : allSubmissions;
+        const filteredItems = items.filter(item =>
+            (item.subreddit || '').toLowerCase() === modalInfo.subreddit.toLowerCase()
+        );
+
+        if (filteredItems.length === 0) return;
+
+        // Get current sort order
+        const sortButton = modalInfo.modal.querySelector('#subreddit-toggle-sort');
+        const isNewestFirst = sortButton && sortButton.textContent.includes('Newest');
+
+        // Sort accordingly
+        const sortedItems = isNewestFirst
+            ? [...filteredItems].sort((a, b) => b.created_utc - a.created_utc)
+            : [...filteredItems].sort((a, b) => a.created_utc - b.created_utc);
+
+        // Update title count
+        const titleDiv = modalInfo.modal.querySelector('.age-modal-title');
+        const kindLabel = modalInfo.kind === 'comment' ? 'Comments' : 'Posts';
+        titleDiv.textContent = `${kindLabel} in r/${modalInfo.subreddit} - u/${modalInfo.username} (${filteredItems.length})`;
+
+        // Update content
+        const content = modalInfo.modal.querySelector('.age-modal-content');
+        content.innerHTML = buildSubredditResultsHTML(sortedItems, modalInfo.kind, modalInfo.username);
+    });
+}
+
+function buildSubredditResultsHTML(items, kind, username) {
+    if (items.length === 0) {
+        return '<p style="color: var(--av-text-muted);">No results found.</p>';
+    }
+
+    return items.map(item => {
+        const isComment = kind === 'comment';
+
+        // Format date
+        const postDate = new Date(item.created_utc * 1000);
+        const formattedDate = postDate.toLocaleString('en-US', {
+            weekday: 'short',
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+
+        // Build content
+        let contentHTML = '';
+        if (isComment) {
+            const body = item.body || '';
+            contentHTML = `<div class="manual-result-body">${escapeHtml(body)}</div>`;
+        } else {
+            const title = item.title || '';
+            const selftext = item.selftext || '';
+            contentHTML = `
+                <div class="manual-result-title">${escapeHtml(title)}</div>
+                ${selftext ? `<div class="manual-result-body">${escapeHtml(selftext)}</div>` : ''}
+            `;
+        }
+
+        // Build permalink
+        const permalink = isComment
+            ? `https://reddit.com${item.permalink}`
+            : `https://reddit.com${item.permalink}`;
+
+        return `
+            <div class="manual-result-item">
+                <div class="manual-result-header">
+                    <div class="manual-result-meta">
+                        <a href="https://reddit.com/user/${item.author}" target="_blank" class="manual-result-author">u/${item.author}</a>
+                        <span class="manual-result-score">Score: ${item.score || 0}</span>
+                    </div>
+                    <span class="age-result-date">${formattedDate}</span>
+                </div>
+                ${contentHTML}
+                <a href="${permalink}" target="_blank" class="age-result-link">View ${isComment ? 'Comment' : 'Post'} →</a>
+            </div>
+        `;
+    }).join('');
 }
 
 // Fetch with pagination support
@@ -5929,6 +6113,31 @@ function attachFrequencyHandlers(modal) {
             const toggle = header.querySelector('.deep-analysis-toggle');
             content.classList.toggle('collapsed');
             toggle.textContent = content.classList.contains('collapsed') ? '▶ Show' : '▼ Hide';
+        });
+    });
+
+    // Attach subreddit filter click handlers
+    modal.querySelectorAll('.subreddit-filter-link').forEach(link => {
+        link.addEventListener('click', () => {
+            const subreddit = link.dataset.subreddit;
+            const username = modal.dataset.username;
+            const modalId = modal.dataset.modalId;
+
+            // Get current view (comments or posts)
+            const commentsView = modal.querySelector('#freq-comments-view');
+            const postsView = modal.querySelector('#freq-posts-view');
+            const isCommentsView = commentsView && commentsView.style.display !== 'none';
+            const kind = isCommentsView ? 'comment' : 'submission';
+
+            // Get all items for current view from parent modal
+            const modalInfo = resultsModals.find(m => m.modalId === modalId);
+            if (!modalInfo) return;
+
+            // Determine which dataset to use
+            const allItems = isCommentsView ? modalInfo.allComments : modalInfo.allSubmissions;
+            if (!allItems || allItems.length === 0) return;
+
+            showSubredditFilteredModal(username, subreddit, allItems, kind, modalId);
         });
     });
 }
