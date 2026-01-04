@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.63
+// @version      1.64
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -8662,7 +8662,13 @@ function initDeletedAuthorRestore() {
 
         if (cachedUsername) {
             // Always auto-restore from cache (no API call needed)
-            displayRestoredAuthor(deletedSpan, cachedUsername);
+            if (cachedUsername === '[deleted]') {
+                // Confirmed deleted in archive
+                displayConfirmedDeleted(deletedSpan);
+            } else {
+                // Valid restored username
+                displayRestoredAuthor(deletedSpan, cachedUsername);
+            }
         } else {
             // Not cached: show manual restore button
             injectRestoreButton(deletedSpan, thingId, null);
@@ -8710,7 +8716,12 @@ function injectRestoreButton(authorElement, thingId, cachedUsername) {
         // If cached, use that; otherwise query PushShift
         const username = cachedUsername || await fetchDeletedAuthor(thingId);
 
-        if (username) {
+        if (username === '[deleted]') {
+            // PushShift archived it but author was already deleted
+            displayConfirmedDeleted(authorElement);
+            cacheDeletedAuthor(thingId, username);
+            button.remove();
+        } else if (username) {
             displayRestoredAuthor(authorElement, username);
             cacheDeletedAuthor(thingId, username);
             button.remove();
@@ -8735,6 +8746,7 @@ async function fetchDeletedAuthor(thingId) {
         const id = thingId.substring(3); // Remove 't3_' or 't1_' prefix
 
         const url = `https://api.pushshift.io/reddit/${type}/search?ids=${id}&fields=author`;
+        logDebug(`Fetching deleted author for ${thingId}: ${url}`);
 
         const response = await fetch(url, {
             headers: {
@@ -8742,23 +8754,46 @@ async function fetchDeletedAuthor(thingId) {
             }
         });
 
-        if (!response.ok) return null;
+        logDebug(`Response status: ${response.status} ${response.statusText}`);
+
+        if (!response.ok) {
+            logDebug(`Failed to fetch deleted author: HTTP ${response.status}`);
+            return null;
+        }
 
         const data = await response.json();
+        logDebug(`API response data:`, data);
+
         if (data.data && data.data.length > 0 && data.data[0].author) {
             const author = data.data[0].author;
-            // Don't return [deleted] as a valid author
+            // Return [deleted] as-is - it means PushShift archived it but author was already deleted
             if (author === '[deleted]') {
-                return null;
+                logDebug(`Author was already deleted in PushShift archive, returning '[deleted]'`);
+            } else {
+                logDebug(`Successfully restored author: ${author}`);
             }
             return author;
         }
 
+        logDebug(`No author found in response (empty data array or missing author field)`);
         return null;
     } catch (error) {
         console.error('Error fetching deleted author:', error);
+        logDebug(`Exception in fetchDeletedAuthor:`, error);
         return null;
     }
+}
+
+// Display confirmed deleted (PushShift archived as [deleted])
+function displayConfirmedDeleted(authorElement) {
+    const deletedSpan = document.createElement('span');
+    deletedSpan.className = 'confirmed-deleted';
+    deletedSpan.textContent = '[deleted]';
+    deletedSpan.style.cssText = 'color: #ff4444; font-weight: normal; cursor: default;';
+    deletedSpan.title = 'Confirmed: Author was already deleted when archived by PushShift';
+
+    // Replace the [deleted] element
+    authorElement.parentNode.replaceChild(deletedSpan, authorElement);
 }
 
 // Display the restored username
@@ -8772,12 +8807,19 @@ function displayRestoredAuthor(authorElement, username) {
     // Create PushShift button
     const pushShiftBtn = document.createElement('button');
     pushShiftBtn.className = 'age-check-button';
+    pushShiftBtn.dataset.username = username;
     pushShiftBtn.textContent = userSettings.defaultButtonText;
     pushShiftBtn.style.cssText = `background-color: ${userSettings.buttonDefaultColor}; margin-left: 5px;`;
     pushShiftBtn.onclick = (e) => {
         e.preventDefault();
         e.stopPropagation();
         handleAgeCheck(username);
+    };
+
+    // Right-click context menu (same as regular buttons)
+    pushShiftBtn.oncontextmenu = (e) => {
+        e.preventDefault();
+        showContextMenu(e, username);
     };
 
     // Replace the [deleted] element and add button
