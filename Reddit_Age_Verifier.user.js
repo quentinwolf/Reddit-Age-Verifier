@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.62
+// @version      1.63
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -51,10 +51,11 @@ let ENABLE_VERY_LOW_CONFIDENCE = true;  // Show age estimates even with very low
 let TITLE_SNIPPET_LENGTH = 150;   // Characters to show for title before truncating
 let BODY_SNIPPET_LENGTH = 300;    // Characters to show for post body before truncating
 
-// Cache expiration times
+// Cache and expiration times
 let CACHE_EXPIRATION = 7 * 24 * 60 * 60 * 1000;      // 1 week for user results
 const TOKEN_EXPIRATION = 24 * 60 * 60 * 1000;          // 24 hours for API token
 const BUTTON_CACHE_EXPIRATION = 365 * 24 * 60 * 60 * 1000; // 1 year for button text
+const DELETED_AUTHOR_CACHE_KEY = 'deletedAuthorCache';
 
 // PushShift API configuration
 const PUSHSHIFT_API_BASE = "https://api.pushshift.io";
@@ -97,6 +98,8 @@ const DEFAULT_SETTINGS = {
     showAgeEstimation: true,
     defaultSort: 'newest', // 'oldest' or 'newest'
     autoFilterPosted: false, // auto-filter to show only posted ages
+    showRestoreButtons: true,          // Enable/disable the restore feature
+    autoRestoreDeletedAuthors: false,  // Future: auto-restore on page load if cached
     modalWidth: 800, // default results modal width in pixels
     modalHeight: 900, // default results modal height in pixels
     paginationLimit: 250,
@@ -2431,6 +2434,25 @@ function showSettingsModal() {
                     </div>
                 </div>
 
+                <div style="margin-bottom: 15px;">
+                    <div style="font-weight: bold; margin-bottom: 8px; color: var(--av-text);">Deleted Author Cache (Restored Users)</div>
+                    <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
+                        <span class="analysis-stat-label">Restored Authors</span>
+                        <span class="analysis-stat-value">${(() => {
+                            const stats = getCacheStatistics();
+                            return stats.deletedAuthorCount;
+                        })()}</span>
+                    </div>
+
+                    <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
+                        <span class="analysis-stat-label">Cache Size</span>
+                        <span class="analysis-stat-value">${(() => {
+                            const stats = getCacheStatistics();
+                            return stats.deletedAuthorCacheSizeFormatted;
+                        })()}</span>
+                    </div>
+                </div>
+
                 <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
                     <span class="analysis-stat-label">API Token Status</span>
                     <span class="analysis-stat-value ${(() => {
@@ -2446,6 +2468,7 @@ function showSettingsModal() {
                 <div class="age-settings-buttons-row" style="margin-top: 15px;">
                     <button class="age-modal-button danger" id="clear-profile-cache-btn">Clear Profile Cache</button>
                     <button class="age-modal-button danger" id="clear-button-cache-btn">Clear Button Cache</button>
+                    <button class="age-modal-button danger" id="clear-deleted-authors-btn">Clear Deleted Authors</button>
                     <button class="age-modal-button danger" id="clear-token-btn">Clear API Token</button>
                 </div>
 
@@ -2551,6 +2574,17 @@ function showSettingsModal() {
                         <option value="oldest" ${userSettings.defaultSort === 'oldest' ? 'selected' : ''}>Oldest First</option>
                         <option value="newest" ${userSettings.defaultSort === 'newest' ? 'selected' : ''}>Newest First</option>
                     </select>
+                </div>
+
+                <div class="age-settings-row">
+                    <label>
+                        <input type="checkbox" id="showRestoreButtons" ${userSettings.showRestoreButtons ? 'checked' : ''}>
+                        Show Restore Buttons for Deleted Authors
+                    </label>
+                    <label style="margin-left: 20px; color: #888;">
+                        <input type="checkbox" id="autoRestoreDeletedAuthors" ${userSettings.autoRestoreDeletedAuthors ? 'checked' : ''} disabled title="Future feature">
+                        Auto-restore deleted authors (Future)
+                    </label>
                 </div>
             </div>
 
@@ -2806,6 +2840,8 @@ function showSettingsModal() {
             autoFilterPosted: modal.querySelector('#setting-auto-filter').checked,
             ignoredUsers: userSettings.ignoredUsers, // Keep existing
             trackedSubreddits: trackedSubreddits,
+            showRestoreButtons: modal.querySelector('#showRestoreButtons').checked,
+            autoRestoreDeletedAuthors: modal.querySelector('#autoRestoreDeletedAuthors').checked,
             minCouplesAgeGap: minCouplesGapValidated,
             customButtons: [],
             commonBots: {}
@@ -3036,6 +3072,15 @@ function showSettingsModal() {
         }
     };
 
+    const clearDeletedAuthorsBtn = modal.querySelector('#clear-deleted-authors-btn');
+    clearDeletedAuthorsBtn.onclick = () => {
+        if (confirm('Clear all restored deleted author usernames? This cannot be undone.')) {
+            clearDeletedAuthorCache();
+            showNotificationBanner('Deleted author cache cleared!', 2000);
+            closeModal();
+        }
+    };
+
     // Attach remove button handlers
     function attachRemoveHandlers(modalElement) {
         modalElement.querySelectorAll('.age-ignored-user-remove').forEach(btn => {
@@ -3221,6 +3266,11 @@ function setButtonCacheText(username, displayText) {
 function clearButtonCache() {
     GM_setValue('ageVerifierButtonCache', '{}');
     Object.keys(buttonCache).forEach(key => delete buttonCache[key]);
+}
+
+function clearDeletedAuthorCache() {
+    GM_setValue(DELETED_AUTHOR_CACHE_KEY, '{}');
+    logDebug('Deleted author cache cleared');
 }
 
 // ============================================================================
@@ -4889,6 +4939,20 @@ function getCacheStatistics() {
         const hoursOld = Math.floor(tokenAge / (1000 * 60 * 60));
         const minutesOld = Math.floor((tokenAge % (1000 * 60 * 60)) / (1000 * 60));
         stats.tokenAge = `${hoursOld}h ${minutesOld}m`;
+    }
+
+    // Deleted author cache stats
+    const deletedAuthorCache = getDeletedAuthorCache();
+    stats.deletedAuthorCount = Object.keys(deletedAuthorCache).length;
+    const deletedAuthorCacheString = JSON.stringify(deletedAuthorCache);
+    stats.deletedAuthorCacheSize = deletedAuthorCacheString.length;
+
+    if (stats.deletedAuthorCacheSize < 1024) {
+        stats.deletedAuthorCacheSizeFormatted = stats.deletedAuthorCacheSize + ' B';
+    } else if (stats.deletedAuthorCacheSize < 1024 * 1024) {
+        stats.deletedAuthorCacheSizeFormatted = (stats.deletedAuthorCacheSize / 1024).toFixed(2) + ' KB';
+    } else {
+        stats.deletedAuthorCacheSizeFormatted = (stats.deletedAuthorCacheSize / (1024 * 1024)).toFixed(2) + ' MB';
     }
 
     return stats;
@@ -8548,6 +8612,180 @@ function buildTimelineSection(analysis) {
 }
 
 // ============================================================================
+// DELETED AUTHOR RESTORATION MODULE
+// ============================================================================
+
+// Get deleted author cache
+function getDeletedAuthorCache() {
+    const cached = GM_getValue(DELETED_AUTHOR_CACHE_KEY, '{}');
+    return JSON.parse(cached);
+}
+
+// Save deleted author to cache
+function cacheDeletedAuthor(thingId, username) {
+    const cache = getDeletedAuthorCache();
+    cache[thingId] = username;
+    GM_setValue(DELETED_AUTHOR_CACHE_KEY, JSON.stringify(cache));
+}
+
+// Get cached author for a thing ID
+function getCachedDeletedAuthor(thingId) {
+    const cache = getDeletedAuthorCache();
+    return cache[thingId] || null;
+}
+
+function initDeletedAuthorRestore() {
+    if (!userSettings.showRestoreButtons) return;
+
+    const cache = getDeletedAuthorCache();
+
+    // Find all spans containing exactly "[deleted]" inside tagline paragraphs
+    const allSpans = document.querySelectorAll('p.tagline span');
+    const deletedSpans = Array.from(allSpans).filter(span =>
+        span.textContent.trim() === '[deleted]'
+    );
+
+    deletedSpans.forEach(deletedSpan => {
+        // Skip if already processed
+        if (deletedSpan.dataset.restoreProcessed) return;
+        deletedSpan.dataset.restoreProcessed = 'true';
+
+        // Extract thing ID from parent context
+        const thingId = extractThingId(deletedSpan);
+        if (!thingId) {
+            logDebug('Could not extract thing ID for deleted author');
+            return;
+        }
+
+        // Check cache first
+        const cachedUsername = cache[thingId];
+
+        if (cachedUsername) {
+            // Always auto-restore from cache (no API call needed)
+            displayRestoredAuthor(deletedSpan, cachedUsername);
+        } else {
+            // Not cached: show manual restore button
+            injectRestoreButton(deletedSpan, thingId, null);
+        }
+    });
+}
+
+// Extract thing ID from various Reddit DOM structures
+function extractThingId(authorElement) {
+    // Try multiple strategies to find the thing ID
+
+    // Strategy 1: Look for parent with data-fullname
+    let parent = authorElement.closest('[data-fullname]');
+    if (parent && parent.dataset.fullname) {
+        return parent.dataset.fullname;
+    }
+
+    // Strategy 2: Parse from permalink
+    parent = authorElement.closest('[data-permalink]');
+    if (parent && parent.dataset.permalink) {
+        const match = parent.dataset.permalink.match(/\/comments\/([^\/]+)/);
+        if (match) return 't3_' + match[1];
+    }
+
+    // Strategy 3: Look for comment ID in parent div
+    parent = authorElement.closest('[id^="thing_"]');
+    if (parent && parent.id) {
+        return parent.id.replace('thing_', '');
+    }
+
+    return null;
+}
+
+// Inject the restore button
+function injectRestoreButton(authorElement, thingId, cachedUsername) {
+    const button = document.createElement('button');
+    button.textContent = 'Restore';
+    button.className = 'restore-deleted-btn';
+    button.style.cssText = 'margin-left: 5px; font-size: 10px; padding: 1px 4px; cursor: pointer;';
+
+    button.onclick = async () => {
+        button.disabled = true;
+        button.textContent = 'Restoring...';
+
+        // If cached, use that; otherwise query PushShift
+        const username = cachedUsername || await fetchDeletedAuthor(thingId);
+
+        if (username) {
+            displayRestoredAuthor(authorElement, username);
+            cacheDeletedAuthor(thingId, username);
+            button.remove();
+        } else {
+            button.textContent = 'Failed';
+            button.disabled = false;
+        }
+    };
+
+    authorElement.parentNode.insertBefore(button, authorElement.nextSibling);
+}
+
+// Query PushShift for deleted author
+async function fetchDeletedAuthor(thingId) {
+    try {
+        if (!apiToken) {
+            logDebug('No API token available for deleted author restoration');
+            return null;
+        }
+
+        const type = thingId.startsWith('t3_') ? 'submission' : 'comment';
+        const id = thingId.substring(3); // Remove 't3_' or 't1_' prefix
+
+        const url = `https://api.pushshift.io/reddit/${type}/search?ids=${id}&fields=author`;
+
+        const response = await fetch(url, {
+            headers: {
+                'Authorization': `Bearer ${apiToken}`
+            }
+        });
+
+        if (!response.ok) return null;
+
+        const data = await response.json();
+        if (data.data && data.data.length > 0 && data.data[0].author) {
+            const author = data.data[0].author;
+            // Don't return [deleted] as a valid author
+            if (author === '[deleted]') {
+                return null;
+            }
+            return author;
+        }
+
+        return null;
+    } catch (error) {
+        console.error('Error fetching deleted author:', error);
+        return null;
+    }
+}
+
+// Display the restored username
+function displayRestoredAuthor(authorElement, username) {
+    const restoredSpan = document.createElement('span');
+    restoredSpan.className = 'restored-author';
+    restoredSpan.textContent = `✓ ${username}`;
+    restoredSpan.style.cssText = 'color: darkgreen; font-weight: normal; cursor: default;';
+    restoredSpan.title = 'Restored from archive (profile deleted)';
+
+    // Create PushShift button
+    const pushShiftBtn = document.createElement('button');
+    pushShiftBtn.className = 'age-check-button';
+    pushShiftBtn.textContent = userSettings.defaultButtonText;
+    pushShiftBtn.style.cssText = `background-color: ${userSettings.buttonDefaultColor}; margin-left: 5px;`;
+    pushShiftBtn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        handleAgeCheck(username);
+    };
+
+    // Replace the [deleted] element and add button
+    authorElement.parentNode.replaceChild(restoredSpan, authorElement);
+    restoredSpan.parentNode.insertBefore(pushShiftBtn, restoredSpan.nextSibling);
+}
+
+// ============================================================================
 // CUSTOM BUTTONS
 // ============================================================================
 
@@ -9177,6 +9415,19 @@ GM_registerMenuCommand('📍 View Tracked Subreddits', () => {
 // Set up mutation observer
 const observer = new MutationObserver(debouncedMainLoop);
 observer.observe(document.body, { childList: true, subtree: true });
+
+// Initialize deleted author restoration on old/www reddit
+if (!isModReddit) {
+    // Run on initial load
+    initDeletedAuthorRestore();
+
+    // Run on future DOM changes (append to debounced loop)
+    const originalDebouncedMainLoop = debouncedMainLoop;
+    debouncedMainLoop = function() {
+        originalDebouncedMainLoop();
+        setTimeout(initDeletedAuthorRestore, 100); // Small delay after main processing
+    };
+}
 
 // Escape key handler to close topmost modal and context menu
 document.addEventListener('keydown', function(e) {
