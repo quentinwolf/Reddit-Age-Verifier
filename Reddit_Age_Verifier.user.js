@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.64
+// @version      1.65
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -2577,15 +2577,17 @@ function showSettingsModal() {
                 </div>
 
                 <div class="age-settings-row">
-                    <label>
-                        <input type="checkbox" id="showRestoreButtons" ${userSettings.showRestoreButtons ? 'checked' : ''}>
-                        Show Restore Buttons for Deleted Authors
-                    </label>
-                    <label style="margin-left: 20px; color: #888;">
-                        <input type="checkbox" id="autoRestoreDeletedAuthors" ${userSettings.autoRestoreDeletedAuthors ? 'checked' : ''} disabled title="Future feature">
-                        Auto-restore deleted authors (Future)
-                    </label>
+                    <label class="age-settings-label">Show Restore Buttons for Deleted Authors</label>
+                    <input type="checkbox" class="age-settings-checkbox"  id="showRestoreButtons"
+                           ${userSettings.showRestoreButtons ? 'checked' : ''}>
                 </div>
+
+                <div class="age-settings-row">
+                    <label class="age-settings-label">Auto-restore deleted authors (Future)</label>
+                    <input type="checkbox" class="age-settings-checkbox"  id="autoRestoreDeletedAuthors"
+                           ${userSettings.autoRestoreDeletedAuthors ? 'checked' : ''} disabled title="Future feature">
+                </div>
+
             </div>
 
             <!-- Age Range Settings -->
