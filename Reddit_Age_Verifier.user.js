@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.65
+// @version      1.66
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -1905,12 +1905,29 @@ function showTokenModal(pendingUsername = null) {
             const userToCheck = GM_getValue('pendingAgeCheck', null);
             GM_setValue('pendingAgeCheck', null);
 
+            // Check for pending restoration
+            const pendingRestorationStr = GM_getValue('pendingRestoration', null);
+            GM_setValue('pendingRestoration', null);
+
             // If there was a pending username, automatically continue the age check
             if (userToCheck) {
                 logDebug("Age Verifier: Continuing with pending check for:", userToCheck);
                 setTimeout(() => {
                     handleAgeCheck(userToCheck);
                 }, 100);
+            }
+
+            // If there was a pending restoration, automatically continue
+            if (pendingRestorationStr) {
+                try {
+                    const pendingRestoration = JSON.parse(pendingRestorationStr);
+                    logDebug("Age Verifier: Continuing with pending restoration for:", pendingRestoration.thingId);
+                    setTimeout(() => {
+                        resumeRestoration(pendingRestoration.thingId);
+                    }, 100);
+                } catch (e) {
+                    logDebug("Age Verifier: Failed to parse pending restoration:", e);
+                }
             }
         }
     }, 500); // Check every 500ms
@@ -8709,31 +8726,122 @@ function injectRestoreButton(authorElement, thingId, cachedUsername) {
     const button = document.createElement('button');
     button.textContent = 'Restore';
     button.className = 'restore-deleted-btn';
+    button.dataset.thingId = thingId;  // Add this line
     button.style.cssText = 'margin-left: 5px; font-size: 10px; padding: 1px 4px; cursor: pointer;';
 
     button.onclick = async () => {
-        button.disabled = true;
-        button.textContent = 'Restoring...';
+        // Check if we have a token first
+        if (!apiToken) {
+            button.disabled = true;
+            button.textContent = 'Restoring...';
 
-        // If cached, use that; otherwise query PushShift
-        const username = cachedUsername || await fetchDeletedAuthor(thingId);
+            // Store restoration context for auto-resume
+            GM_setValue('pendingRestoration', JSON.stringify({
+                thingId: thingId,
+                timestamp: Date.now()
+            }));
 
-        if (username === '[deleted]') {
-            // PushShift archived it but author was already deleted
-            displayConfirmedDeleted(authorElement);
-            cacheDeletedAuthor(thingId, username);
-            button.remove();
-        } else if (username) {
-            displayRestoredAuthor(authorElement, username);
-            cacheDeletedAuthor(thingId, username);
-            button.remove();
-        } else {
-            button.textContent = 'Failed';
-            button.disabled = false;
+            attemptAutoFetchToken();
+            showTokenModal();
+            return;
         }
+
+        // Proceed with restoration
+        await performRestoration(authorElement, button, thingId, cachedUsername);
     };
 
     authorElement.parentNode.insertBefore(button, authorElement.nextSibling);
+}
+
+// Perform the actual restoration (called by both direct click and resume flow)
+async function performRestoration(authorElement, button, thingId, cachedUsername) {
+    button.disabled = true;
+    button.textContent = 'Restoring...';
+
+    // If cached, use that; otherwise query PushShift
+    const username = cachedUsername || await fetchDeletedAuthor(thingId);
+
+    if (username === '[deleted]') {
+        // PushShift archived it but author was already deleted
+        displayConfirmedDeleted(authorElement);
+        cacheDeletedAuthor(thingId, username);
+        button.remove();
+    } else if (username) {
+        displayRestoredAuthor(authorElement, username);
+        cacheDeletedAuthor(thingId, username);
+        button.remove();
+    } else {
+        button.textContent = 'Failed';
+        button.disabled = false;
+    }
+}
+
+// Resume a pending restoration after OAuth completes
+async function resumeRestoration(thingId) {
+    logDebug('=== RESUME RESTORATION FLOW START ===');
+    logDebug(`Resuming restoration for thingId: ${thingId}`);
+
+    // Find the button for this thingId
+    const button = document.querySelector(`.restore-deleted-btn[data-thing-id="${thingId}"]`);
+    if (!button) {
+        logDebug('ERROR: Could not find restore button to resume');
+        return;
+    }
+    logDebug('Button found:', button);
+
+    // Get the parent tagline paragraph
+    const tagline = button.closest('p.tagline');
+    if (!tagline) {
+        logDebug('ERROR: Could not find parent tagline');
+        return;
+    }
+    logDebug('Tagline found:', tagline);
+
+    // Find the [deleted] span with data-restore-processed attribute
+    let authorElement = tagline.querySelector('[data-restore-processed="true"]');
+
+    // If not found by attribute, search for any span with [deleted] text
+    if (!authorElement) {
+        const allSpans = tagline.querySelectorAll('span');
+        for (const span of allSpans) {
+            if (span.textContent.trim() === '[deleted]') {
+                authorElement = span;
+                break;
+            }
+        }
+    }
+
+    if (!authorElement) {
+        logDebug('ERROR: Could not find [deleted] span in tagline');
+        return;
+    }
+
+    logDebug('authorElement found:', authorElement);
+    logDebug('authorElement.textContent:', authorElement.textContent);
+
+    // Now execute the exact same logic as the original onclick handler
+    button.disabled = true;
+    button.textContent = 'Restoring...';
+
+    // If cached, use that; otherwise query PushShift
+    const cachedUsername = getCachedDeletedAuthor(thingId);
+    const username = cachedUsername || await fetchDeletedAuthor(thingId);
+
+    logDebug('Username returned:', username);
+
+    if (username === '[deleted]') {
+        displayConfirmedDeleted(authorElement);
+        cacheDeletedAuthor(thingId, username);
+        button.remove();
+    } else if (username) {
+        displayRestoredAuthor(authorElement, username);
+        cacheDeletedAuthor(thingId, username);
+        button.remove();
+    } else {
+        button.textContent = 'Failed';
+        button.disabled = false;
+    }
+    logDebug('=== RESUME RESTORATION FLOW END ===');
 }
 
 // Query PushShift for deleted author
@@ -8757,6 +8865,13 @@ async function fetchDeletedAuthor(thingId) {
         });
 
         logDebug(`Response status: ${response.status} ${response.statusText}`);
+
+        // Handle expired/invalid token
+        if (response.status === 401 || response.status === 403) {
+            logDebug('Token expired or invalid for deleted author restoration');
+            clearToken();
+            throw new Error('Token expired or invalid');
+        }
 
         if (!response.ok) {
             logDebug(`Failed to fetch deleted author: HTTP ${response.status}`);
