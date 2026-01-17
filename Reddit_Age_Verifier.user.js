@@ -9215,7 +9215,7 @@ function displayRestoredAuthor(authorElement, username) {
     restoredSpan.href = `https://old.reddit.com/user/${username}`;
     restoredSpan.target = '_blank';
     restoredSpan.style.cssText = 'color: darkgreen; font-weight: normal; cursor: pointer;';
-    restoredSpan.title = 'Restored from archive (profile deleted)';
+    restoredSpan.title = 'Restored from archive (post or profile deleted)';
 
     // Create PushShift button
     const pushShiftBtn = document.createElement('button');
