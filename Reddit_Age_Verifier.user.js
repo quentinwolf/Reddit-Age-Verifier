@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.70
+// @version      1.71
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -7780,7 +7780,9 @@ function copyDeepAnalysisSectionAsMarkdown(sectionType, analysis, username) {
                                 if (entry.index === 0 || prevAge === null) {
                                     changeText = '(First)';
                                 } else if (point.age > prevAge) {
-                                    changeText = `⚠️ +${point.age - prevAge}`;
+                                    const ageDiff = point.age - prevAge;
+                                    const emoji = ageDiff === 1 ? '🔼' : '🚫';
+                                    changeText = `${emoji} +${ageDiff}`;
                                 } else if (point.age < prevAge) {
                                     changeText = `⚠️ ${point.age - prevAge}`;
                                 } else {
@@ -7804,7 +7806,9 @@ function copyDeepAnalysisSectionAsMarkdown(sectionType, analysis, username) {
                         if (idx === 0 || prevAge === null) {
                             changeText = '(First)';
                         } else if (point.age > prevAge) {
-                            changeText = `⚠️ +${point.age - prevAge}`;
+                            const ageDiff = point.age - prevAge;
+                            const emoji = ageDiff === 1 ? '🔼' : '🚫';
+                            changeText = `${emoji} +${ageDiff}`;
                         } else if (point.age < prevAge) {
                             changeText = `⚠️ ${point.age - prevAge}`;
                         } else {
@@ -8886,7 +8890,9 @@ function createTimelineEntry(point, idx, prevAge, trackedSubs) {
         changeText = '(First)';
     } else if (point.age > prevAge) {
         entryClass = 'age-increase';
-        changeText = `⚠️ +${point.age - prevAge}`;
+        const ageDiff = point.age - prevAge;
+        const emoji = ageDiff === 1 ? '🔼' : '🚫';
+        changeText = `${emoji} +${ageDiff}`;
     } else if (point.age < prevAge) {
         entryClass = 'age-decrease';
         changeText = `⚠️ ${point.age - prevAge}`;
@@ -8911,78 +8917,6 @@ function createTimelineEntry(point, idx, prevAge, trackedSubs) {
     `;
 
     return { html, isTracked };
-}
-
-function buildOldTimelineSection_UNUSED(analysis) {
-    if (analysis.timeline.length === 0) {
-        return `
-            <div class="deep-analysis-section">
-                <div class="deep-analysis-header">
-                    <span class="deep-analysis-title">📅 Age Timeline</span>
-                    <span class="deep-analysis-toggle">▼ Hide</span>
-                </div>
-                <div class="deep-analysis-content">
-                    <p style="color: var(--av-text-muted);">No timeline data available.</p>
-                </div>
-            </div>
-        `;
-    }
-
-    // Group by transitions for cleaner display
-    const timelineEntries = [];
-    let prevAge = null;
-
-    // Show most recent 50 entries
-    const displayTimeline = analysis.timeline.slice(-50);
-
-    displayTimeline.forEach((point, idx) => {
-        let entryClass = 'age-same';
-        let changeText = '';
-
-        if (idx === 0 || prevAge === null) {
-            entryClass = 'first-post';
-            changeText = '(First recorded)';
-        } else if (point.age > prevAge) {
-            entryClass = 'age-increase';
-            changeText = `(+${point.age - prevAge} from ${prevAge})`;
-        } else if (point.age < prevAge) {
-            entryClass = 'age-decrease';
-            changeText = `(${point.age - prevAge} from ${prevAge}) ⚠️`;
-        }
-
-        timelineEntries.push(`
-            <div class="timeline-entry ${entryClass}">
-                <span class="timeline-date">${new Date(point.timestamp * 1000).toLocaleDateString('en-US', {
-                    year: 'numeric', month: 'short', day: 'numeric'
-                })}</span>
-                <span class="timeline-age" style="color: ${entryClass === 'age-decrease' ? '#ff6b6b' : 'var(--av-text)'};">
-                    Age: <a href="${point.permalink}" target="_blank" style="color: inherit; text-decoration: underline;">${point.age}</a>
-                </span>
-                <span class="timeline-subreddit" style="margin-left: 8px;"><a href="https://old.reddit.com/r/${point.subreddit}" target="_blank" style="color: var(--av-link);">r/${point.subreddit}</a></span>
-                <span class="timeline-change">${changeText}</span>
-            </div>
-        `);
-
-        prevAge = point.age;
-    });
-
-    const hiddenCount = analysis.timeline.length - displayTimeline.length;
-
-    return `
-        <div class="deep-analysis-section">
-            <div class="deep-analysis-header">
-                <span class="deep-analysis-title">📅 Age Timeline (${analysis.timeline.length} entries)</span>
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <button class="deep-analysis-copy" data-section="timeline" title="Copy as Markdown">📋</button>
-                    <span class="deep-analysis-toggle">▼ Hide</span>
-                </div>
-            </div>
-            <div class="deep-analysis-content">
-                ${hiddenCount > 0 ? `<p style="color: var(--av-text-muted); margin-bottom: 10px; font-size: 12px;">Showing most recent 50 entries. ${hiddenCount} older entries hidden.</p>` : ''}
-                ${timelineEntries.join('')}
-            </div>
-        </div>
-    `;
 }
 
 // ============================================================================
