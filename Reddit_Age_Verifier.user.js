@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.68
+// @version      1.69
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -9209,10 +9209,12 @@ function displayConfirmedDeleted(authorElement) {
 
 // Display the restored username
 function displayRestoredAuthor(authorElement, username) {
-    const restoredSpan = document.createElement('span');
+    const restoredSpan = document.createElement('a');
     restoredSpan.className = 'restored-author';
     restoredSpan.textContent = `✓ ${username}`;
-    restoredSpan.style.cssText = 'color: darkgreen; font-weight: normal; cursor: default;';
+    restoredSpan.href = `https://old.reddit.com/user/${username}`;
+    restoredSpan.target = '_blank';
+    restoredSpan.style.cssText = 'color: darkgreen; font-weight: normal; cursor: pointer;';
     restoredSpan.title = 'Restored from archive (profile deleted)';
 
     // Create PushShift button
