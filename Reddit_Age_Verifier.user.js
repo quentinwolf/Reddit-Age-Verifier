@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.66
+// @version      1.67
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -7714,34 +7714,78 @@ function copyDeepAnalysisSectionAsMarkdown(sectionType, analysis, username) {
             if (analysis.timeline.length === 0) {
                 markdown += 'No timeline data available.\n';
             } else {
-                const displayTimeline = analysis.timeline.slice(-50);
+                // Get the displayed entries from the DOM (includes compression info)
+                const timelineContent = document.querySelector(`[data-section="timeline"]`)
+                    ?.closest('.deep-analysis-section')
+                    ?.querySelector('.deep-analysis-content');
+
+                const entriesData = timelineContent?.dataset.timelineEntries
+                    ? JSON.parse(timelineContent.dataset.timelineEntries)
+                    : null;
+
                 markdown += '| Date | Age | Subreddit | Change |\n';
                 markdown += '|------|-----|-----------|--------|\n';
 
-                let prevAge = null;
-                displayTimeline.forEach((point, idx) => {
-                    const date = new Date(point.timestamp * 1000).toLocaleDateString('en-US', {
-                        year: 'numeric', month: 'short', day: 'numeric'
+                if (entriesData && entriesData.length > 0) {
+                    // Use the compressed display data
+                    entriesData.forEach((entry, idx) => {
+                        if (entry.isCompressed) {
+                            const compressedText = entry.trackedInCompressed > 0
+                                ? `[Compressed: ${entry.compressedCount} posts, ${entry.trackedInCompressed} in tracked subs]`
+                                : `[Compressed: ${entry.compressedCount} posts]`;
+                            markdown += `| [${entry.startDate} - ${entry.endDate}] | Age: ${entry.age} | ${compressedText} | — |\n`;
+                        } else {
+                            // Extract info from the timeline point
+                            const point = analysis.timeline[entry.index];
+                            if (point) {
+                                const date = new Date(point.timestamp * 1000).toLocaleDateString('en-US', {
+                                    year: 'numeric', month: 'short', day: 'numeric'
+                                });
+                                const prevAge = entry.index > 0 ? analysis.timeline[entry.index - 1].age : null;
+                                let changeText = '';
+
+                                if (entry.index === 0 || prevAge === null) {
+                                    changeText = '(First)';
+                                } else if (point.age > prevAge) {
+                                    changeText = `⚠️ +${point.age - prevAge}`;
+                                } else if (point.age < prevAge) {
+                                    changeText = `⚠️ ${point.age - prevAge}`;
+                                } else {
+                                    changeText = '—';
+                                }
+
+                                markdown += `| ${date} | ${point.age} | r/${point.subreddit} | ${changeText} |\n`;
+                            }
+                        }
                     });
-                    let changeText = '';
+                } else {
+                    // Fallback to old behavior if no compressed data
+                    const displayTimeline = analysis.timeline.slice(-50);
+                    let prevAge = null;
+                    displayTimeline.forEach((point, idx) => {
+                        const date = new Date(point.timestamp * 1000).toLocaleDateString('en-US', {
+                            year: 'numeric', month: 'short', day: 'numeric'
+                        });
+                        let changeText = '';
 
-                    if (idx === 0 || prevAge === null) {
-                        changeText = '(First)';
-                    } else if (point.age > prevAge) {
-                        changeText = `+${point.age - prevAge}`;
-                    } else if (point.age < prevAge) {
-                        changeText = `⚠️ ${point.age - prevAge}`;
-                    } else {
-                        changeText = '—';
+                        if (idx === 0 || prevAge === null) {
+                            changeText = '(First)';
+                        } else if (point.age > prevAge) {
+                            changeText = `⚠️ +${point.age - prevAge}`;
+                        } else if (point.age < prevAge) {
+                            changeText = `⚠️ ${point.age - prevAge}`;
+                        } else {
+                            changeText = '—';
+                        }
+
+                        markdown += `| ${date} | ${point.age} | r/${point.subreddit} | ${changeText} |\n`;
+                        prevAge = point.age;
+                    });
+
+                    const hiddenCount = analysis.timeline.length - displayTimeline.length;
+                    if (hiddenCount > 0) {
+                        markdown += `\n*Showing most recent 50 entries. ${hiddenCount} older entries hidden.*\n`;
                     }
-
-                    markdown += `| ${date} | ${point.age} | r/${point.subreddit} | ${changeText} |\n`;
-                    prevAge = point.age;
-                });
-
-                const hiddenCount = analysis.timeline.length - displayTimeline.length;
-                if (hiddenCount > 0) {
-                    markdown += `\n*Showing most recent 50 entries. ${hiddenCount} older entries hidden.*\n`;
                 }
             }
             break;
@@ -8559,6 +8603,255 @@ function buildCouplesSection(analysis) {
 }
 
 function buildTimelineSection(analysis) {
+    if (analysis.timeline.length === 0) {
+        return `
+            <div class="deep-analysis-section">
+                <div class="deep-analysis-header">
+                    <span class="deep-analysis-title">📅 Age Timeline</span>
+                    <span class="deep-analysis-toggle">▼ Hide</span>
+                </div>
+                <div class="deep-analysis-content">
+                    <p style="color: var(--av-text-muted);">No timeline data available.</p>
+                </div>
+            </div>
+        `;
+    }
+
+    const trackedSubs = (userSettings.trackedSubreddits || []).map(s => s.toLowerCase());
+    const totalEntries = analysis.timeline.length;
+
+    // For small datasets (≤100), show all entries
+    if (totalEntries <= 100) {
+        return buildTimelineFull(analysis, trackedSubs);
+    }
+
+    // For larger datasets, use tiered compression
+    return buildTimelineCompressed(analysis, trackedSubs);
+}
+
+function buildTimelineFull(analysis, trackedSubs) {
+    const timelineEntries = [];
+    let prevAge = null;
+
+    analysis.timeline.forEach((point, idx) => {
+        const entry = createTimelineEntry(point, idx, prevAge, trackedSubs);
+        timelineEntries.push(entry.html);
+        prevAge = point.age;
+    });
+
+    return `
+        <div class="deep-analysis-section">
+            <div class="deep-analysis-header">
+                <span class="deep-analysis-title">📅 Age Timeline (${analysis.timeline.length} entries)</span>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <button class="deep-analysis-copy" data-section="timeline" title="Copy as Markdown">📋</button>
+                    <span class="deep-analysis-toggle">▼ Hide</span>
+                </div>
+            </div>
+            <div class="deep-analysis-content">
+                ${timelineEntries.join('')}
+            </div>
+        </div>
+    `;
+}
+
+function buildTimelineCompressed(analysis, trackedSubs) {
+    const timeline = analysis.timeline;
+    const displayEntries = [];
+    const maxVisibleRows = 150;
+    const contextPosts = 3; // Posts to show before/after age changes
+
+    let i = 0;
+
+    while (i < timeline.length) {
+        const point = timeline[i];
+        const prevAge = i > 0 ? timeline[i - 1].age : null;
+
+        // Detect age change
+        const isAgeChange = prevAge !== null && point.age !== prevAge;
+        const isFirstPost = i === 0;
+
+        if (isFirstPost || isAgeChange) {
+            // Show context posts BEFORE the age change
+            if (isAgeChange) {
+                const contextStart = Math.max(0, i - contextPosts);
+                for (let j = contextStart; j < i; j++) {
+                    const contextPoint = timeline[j];
+                    const contextPrevAge = j > 0 ? timeline[j - 1].age : null;
+                    const entry = createTimelineEntry(contextPoint, j, contextPrevAge, trackedSubs);
+                    displayEntries.push({ html: entry.html, index: j, isCompressed: false });
+                }
+            }
+
+            // Show the age change post (or first post)
+            const entry = createTimelineEntry(point, i, prevAge, trackedSubs);
+            displayEntries.push({ html: entry.html, index: i, isCompressed: false });
+            i++;
+
+            // Show context posts AFTER the age change
+            const afterContextEnd = Math.min(i + contextPosts, timeline.length);
+            for (let j = i; j < afterContextEnd; j++) {
+                const contextPoint = timeline[j];
+                const contextPrevAge = timeline[j - 1].age;
+                const entry = createTimelineEntry(contextPoint, j, contextPrevAge, trackedSubs);
+                displayEntries.push({ html: entry.html, index: j, isCompressed: false });
+            }
+            i = afterContextEnd;
+        } else {
+            // We're in a stable age period - find its extent
+            const stableAgeStart = i;
+            let stableAgeEnd = i;
+
+            while (stableAgeEnd < timeline.length && timeline[stableAgeEnd].age === point.age) {
+                stableAgeEnd++;
+            }
+
+            const stableLength = stableAgeEnd - stableAgeStart;
+
+            // If stable period is short (<15 posts), show all
+            if (stableLength < 15) {
+                for (let j = stableAgeStart; j < stableAgeEnd; j++) {
+                    const p = timeline[j];
+                    const pPrevAge = j > 0 ? timeline[j - 1].age : null;
+                    const entry = createTimelineEntry(p, j, pPrevAge, trackedSubs);
+                    displayEntries.push({ html: entry.html, index: j, isCompressed: false });
+                }
+                i = stableAgeEnd;
+            } else {
+                // Long stable period - compress the middle
+                const showFirst = 3; // Show first 3 posts of stable period
+                const showLast = 3;  // Show last 3 posts of stable period
+
+                // Show first N posts
+                for (let j = stableAgeStart; j < Math.min(stableAgeStart + showFirst, stableAgeEnd); j++) {
+                    const p = timeline[j];
+                    const pPrevAge = j > 0 ? timeline[j - 1].age : null;
+                    const entry = createTimelineEntry(p, j, pPrevAge, trackedSubs);
+                    displayEntries.push({ html: entry.html, index: j, isCompressed: false });
+                }
+
+                // Create compression row for the middle
+                const compressStart = stableAgeStart + showFirst;
+                const compressEnd = stableAgeEnd - showLast;
+                const compressedCount = Math.max(0, compressEnd - compressStart);
+
+                if (compressedCount > 0) {
+                    // Count tracked subs in compressed section
+                    let trackedInCompressed = 0;
+                    for (let j = compressStart; j < compressEnd; j++) {
+                        if (trackedSubs.includes(timeline[j].subreddit.toLowerCase())) {
+                            trackedInCompressed++;
+                        }
+                    }
+
+                    const startDate = new Date(timeline[compressStart].timestamp * 1000).toLocaleDateString('en-US', {
+                        year: 'numeric', month: 'short', day: 'numeric'
+                    });
+                    const endDate = new Date(timeline[compressEnd - 1].timestamp * 1000).toLocaleDateString('en-US', {
+                        year: 'numeric', month: 'short', day: 'numeric'
+                    });
+
+                    const compressedText = trackedInCompressed > 0
+                        ? `[Compressed: ${compressedCount} posts, ${trackedInCompressed} in tracked subs]`
+                        : `[Compressed: ${compressedCount} posts]`;
+
+                    const compressedHtml = `
+                        <div class="timeline-entry age-same" style="opacity: 0.6;">
+                            <span class="timeline-date">[${startDate} - ${endDate}]</span>
+                            <span class="timeline-age">Age: ${point.age}</span>
+                            <span class="timeline-subreddit">${compressedText}</span>
+                            <span class="timeline-change">—</span>
+                        </div>
+                    `;
+                    displayEntries.push({
+                        html: compressedHtml,
+                        index: compressStart,
+                        isCompressed: true,
+                        compressedCount: compressedCount,
+                        trackedInCompressed: trackedInCompressed,
+                        age: point.age,
+                        startDate: startDate,
+                        endDate: endDate
+                    });
+                }
+
+                // Show last N posts
+                for (let j = Math.max(compressEnd, stableAgeStart + showFirst); j < stableAgeEnd; j++) {
+                    const p = timeline[j];
+                    const pPrevAge = timeline[j - 1].age;
+                    const entry = createTimelineEntry(p, j, pPrevAge, trackedSubs);
+                    displayEntries.push({ html: entry.html, index: j, isCompressed: false });
+                }
+
+                i = stableAgeEnd;
+            }
+        }
+    }
+
+    // If still too many entries, trim from the beginning (keep most recent)
+    const finalDisplay = displayEntries.length > maxVisibleRows
+        ? displayEntries.slice(-maxVisibleRows)
+        : displayEntries;
+
+    const hiddenCount = displayEntries.length - finalDisplay.length;
+    const compressionNote = hiddenCount > 0
+        ? `<p style="color: var(--av-text-muted); margin-bottom: 10px; font-size: 12px;">Showing ${finalDisplay.length} entries. ${hiddenCount} older entries hidden.</p>`
+        : '';
+
+    return `
+        <div class="deep-analysis-section">
+            <div class="deep-analysis-header">
+                <span class="deep-analysis-title">📅 Age Timeline (${analysis.timeline.length} entries)</span>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <button class="deep-analysis-copy" data-section="timeline" title="Copy as Markdown">📋</button>
+                    <span class="deep-analysis-toggle">▼ Hide</span>
+                </div>
+            </div>
+            <div class="deep-analysis-content" data-timeline-entries='${JSON.stringify(finalDisplay)}'>
+                ${compressionNote}
+                ${finalDisplay.map(e => e.html).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function createTimelineEntry(point, idx, prevAge, trackedSubs) {
+    let entryClass = 'age-same';
+    let changeText = '';
+
+    if (idx === 0 || prevAge === null) {
+        entryClass = 'first-post';
+        changeText = '(First)';
+    } else if (point.age > prevAge) {
+        entryClass = 'age-increase';
+        changeText = `⚠️ +${point.age - prevAge}`;
+    } else if (point.age < prevAge) {
+        entryClass = 'age-decrease';
+        changeText = `⚠️ ${point.age - prevAge}`;
+    } else {
+        changeText = '—';
+    }
+
+    const isTracked = trackedSubs.includes(point.subreddit.toLowerCase());
+    const trackedStyle = isTracked ? 'font-weight: bold;' : '';
+
+    const html = `
+        <div class="timeline-entry ${entryClass}">
+            <span class="timeline-date">${new Date(point.timestamp * 1000).toLocaleDateString('en-US', {
+                year: 'numeric', month: 'short', day: 'numeric'
+            })}</span>
+            <span class="timeline-age" style="color: ${entryClass === 'age-decrease' ? '#ff6b6b' : 'var(--av-text)'};">
+                Age: <a href="${point.permalink}" target="_blank" style="color: inherit; text-decoration: underline;">${point.age}</a>
+            </span>
+            <span class="timeline-subreddit" style="margin-left: 8px; ${trackedStyle}"><a href="https://old.reddit.com/r/${point.subreddit}" target="_blank" style="color: var(--av-link);">r/${point.subreddit}</a></span>
+            <span class="timeline-change">${changeText}</span>
+        </div>
+    `;
+
+    return { html, isTracked };
+}
+
+function buildOldTimelineSection_UNUSED(analysis) {
     if (analysis.timeline.length === 0) {
         return `
             <div class="deep-analysis-section">
