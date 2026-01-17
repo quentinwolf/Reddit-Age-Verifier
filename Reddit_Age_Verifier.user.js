@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.72
+// @version      1.73
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -107,6 +107,7 @@ const DEFAULT_SETTINGS = {
     minCouplesAgeGap: 10, // minimum age gap (years) to detect couples accounts
     timelineContextPosts: 1, // to provide surrounding context when compressing posts in the Deep Analysis Age Timeline
     timelineCompressionThreshold: 5, // threshold to compress additional posts with the same age in the Deep Analysis Age Timeline
+    timelineCompressionMinEntries: 50, // minimum timeline entries before compression is enabled
     commonBots: {
         'AutoModerator': true,
         'RepostSleuthBot': true,
@@ -2591,6 +2592,16 @@ function showSettingsModal() {
                 </span>
 
                 <div class="age-settings-row">
+                    <label class="age-settings-label">Timeline Compression Min Entries (30-200):</label>
+                    <input type="number" class="age-settings-numberinput" id="setting-timeline-min-entries"
+                           value="${userSettings.timelineCompressionMinEntries}" min="30" max="200">
+                </div>
+
+                <span class="age-settings-help-text" style="display: block; margin-top: -8px; margin-bottom: 12px;">
+                    Minimum total timeline entries before compression is applied. Lower = compression starts sooner.
+                </span>
+
+                <div class="age-settings-row">
                     <label class="age-settings-label">Deep Analysis Timeline Context Posts (1-5):</label>
                     <input type="number" class="age-settings-numberinput" id="setting-timeline-context"
                            value="${userSettings.timelineContextPosts}" min="1" max="5">
@@ -2864,6 +2875,9 @@ function showSettingsModal() {
         const timelineThresholdInput = parseInt(modal.querySelector('#setting-timeline-threshold').value);
         const timelineThresholdValidated = Math.max(5, Math.min(20, timelineThresholdInput)); // Clamp to 5-20
 
+        const timelineMinEntriesInput = parseInt(modal.querySelector('#setting-timeline-min-entries').value);
+        const timelineMinEntriesValidated = Math.max(30, Math.min(200, timelineMinEntriesInput)); // Clamp to 30-200
+
         const customColors = {};
         modal.querySelectorAll('.custom-color-input').forEach(input => {
             customColors[input.dataset.colorKey] = input.value;
@@ -2895,6 +2909,7 @@ function showSettingsModal() {
             minCouplesAgeGap: minCouplesGapValidated,
             timelineContextPosts: timelineContextValidated,
             timelineCompressionThreshold: timelineThresholdValidated,
+            timelineCompressionMinEntries: timelineMinEntriesValidated,
             customButtons: [],
             commonBots: {}
         };
@@ -2953,7 +2968,7 @@ function showSettingsModal() {
         }
 
         showNotificationBanner('Settings saved! Please refresh the page for all changes to take effect.', 4000);
-        closeModal();
+        //closeModal();
     };
 
     exportBtn.onclick = () => {
@@ -8656,9 +8671,10 @@ function buildTimelineSection(analysis) {
 
     const trackedSubs = (userSettings.trackedSubreddits || []).map(s => s.toLowerCase());
     const totalEntries = analysis.timeline.length;
+    const minEntries = userSettings.timelineCompressionMinEntries || 50;
 
-    // For small datasets (≤100), show all entries
-    if (totalEntries <= 100) {
+    // For small datasets, show all entries
+    if (totalEntries <= minEntries) {
         return buildTimelineFull(analysis, trackedSubs);
     }
 
