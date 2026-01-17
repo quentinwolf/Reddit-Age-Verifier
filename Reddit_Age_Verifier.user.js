@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.67
+// @version      1.68
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -106,13 +106,14 @@ const DEFAULT_SETTINGS = {
     trackedSubreddits: [], // subreddits to compare age behavior against
     minCouplesAgeGap: 10, // minimum age gap (years) to detect couples accounts
     commonBots: {
-        AutoModerator: true,
-        RepostSleuthBot: true,
-        sneakpeekbot: true,
-        RemindMeBot: true,
-        MTGCardFetcher: true,
-        magic_eye_bot: true,
-        auto_modmail: true,
+        'AutoModerator': true,
+        'RepostSleuthBot': true,
+        'sneakpeekbot': true,
+        'RemindMeBot': true,
+        'MTGCardFetcher': true,
+        'magic_eye_bot': true,
+        'auto_modmail': true,
+        'evasion-guard': true,
     },
     customButtons: [
         // Example: { id: 'clickme', label: 'Clickable Button', type: 'link', urlTemplate: 'https://someurl.here', enabled: true, style: 'danger', showInContextMenu: false }
@@ -1019,7 +1020,7 @@ GM_addStyle(`
     .timeline-date {
         color: var(--av-text-muted);
         font-size: 11px;
-        min-width: 140px;
+        min-width: 160px;
     }
 
     .timeline-age {
@@ -1030,13 +1031,13 @@ GM_addStyle(`
     .timeline-subreddit {
         color: var(--av-primary);
         font-size: 12px;
-        min-width: 150px;
+        flex: 1;
     }
 
     .timeline-change {
         color: var(--av-text-muted);
         font-size: 12px;
-        flex: 1;
+        min-width: 50px;
     }
 
     .subreddit-comparison-table {
@@ -7723,8 +7724,8 @@ function copyDeepAnalysisSectionAsMarkdown(sectionType, analysis, username) {
                     ? JSON.parse(timelineContent.dataset.timelineEntries)
                     : null;
 
-                markdown += '| Date | Age | Subreddit | Change |\n';
-                markdown += '|------|-----|-----------|--------|\n';
+                markdown += '| Date | Age | Change | Subreddit |\n';
+                markdown += '|------|-----|--------|-----------|\n';
 
                 if (entriesData && entriesData.length > 0) {
                     // Use the compressed display data
@@ -7733,7 +7734,7 @@ function copyDeepAnalysisSectionAsMarkdown(sectionType, analysis, username) {
                             const compressedText = entry.trackedInCompressed > 0
                                 ? `[Compressed: ${entry.compressedCount} posts, ${entry.trackedInCompressed} in tracked subs]`
                                 : `[Compressed: ${entry.compressedCount} posts]`;
-                            markdown += `| [${entry.startDate} - ${entry.endDate}] | Age: ${entry.age} | ${compressedText} | — |\n`;
+                            markdown += `| ${entry.startDate} - ${entry.endDate} | ${entry.age} | — | ${compressedText} |\n`;
                         } else {
                             // Extract info from the timeline point
                             const point = analysis.timeline[entry.index];
@@ -7754,7 +7755,7 @@ function copyDeepAnalysisSectionAsMarkdown(sectionType, analysis, username) {
                                     changeText = '—';
                                 }
 
-                                markdown += `| ${date} | ${point.age} | r/${point.subreddit} | ${changeText} |\n`;
+                                markdown += `| ${date} | ${point.age} | ${changeText} | r/${point.subreddit} |\n`;
                             }
                         }
                     });
@@ -7778,7 +7779,7 @@ function copyDeepAnalysisSectionAsMarkdown(sectionType, analysis, username) {
                             changeText = '—';
                         }
 
-                        markdown += `| ${date} | ${point.age} | r/${point.subreddit} | ${changeText} |\n`;
+                        markdown += `| ${date} | ${point.age} | ${changeText} | r/${point.subreddit} |\n`;
                         prevAge = point.age;
                     });
 
@@ -8757,10 +8758,10 @@ function buildTimelineCompressed(analysis, trackedSubs) {
 
                     const compressedHtml = `
                         <div class="timeline-entry age-same" style="opacity: 0.6;">
-                            <span class="timeline-date">[${startDate} - ${endDate}]</span>
+                            <span class="timeline-date">${startDate} - ${endDate}</span>
                             <span class="timeline-age">Age: ${point.age}</span>
-                            <span class="timeline-subreddit">${compressedText}</span>
                             <span class="timeline-change">—</span>
+                            <span class="timeline-subreddit">${compressedText}</span>
                         </div>
                     `;
                     displayEntries.push({
@@ -8843,8 +8844,8 @@ function createTimelineEntry(point, idx, prevAge, trackedSubs) {
             <span class="timeline-age" style="color: ${entryClass === 'age-decrease' ? '#ff6b6b' : 'var(--av-text)'};">
                 Age: <a href="${point.permalink}" target="_blank" style="color: inherit; text-decoration: underline;">${point.age}</a>
             </span>
-            <span class="timeline-subreddit" style="margin-left: 8px; ${trackedStyle}"><a href="https://old.reddit.com/r/${point.subreddit}" target="_blank" style="color: var(--av-link);">r/${point.subreddit}</a></span>
             <span class="timeline-change">${changeText}</span>
+            <span class="timeline-subreddit" style="${trackedStyle}"><a href="https://old.reddit.com/r/${point.subreddit}" target="_blank" style="color: var(--av-link);">r/${point.subreddit}</a></span>
         </div>
     `;
 
