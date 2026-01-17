@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.71
+// @version      1.72
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -7781,7 +7781,7 @@ function copyDeepAnalysisSectionAsMarkdown(sectionType, analysis, username) {
                                     changeText = '(First)';
                                 } else if (point.age > prevAge) {
                                     const ageDiff = point.age - prevAge;
-                                    const emoji = ageDiff === 1 ? '🔼' : '🚫';
+                                    const emoji = ageDiff === 1 ? '📈' : '🛑';
                                     changeText = `${emoji} +${ageDiff}`;
                                 } else if (point.age < prevAge) {
                                     changeText = `⚠️ ${point.age - prevAge}`;
@@ -7807,7 +7807,7 @@ function copyDeepAnalysisSectionAsMarkdown(sectionType, analysis, username) {
                             changeText = '(First)';
                         } else if (point.age > prevAge) {
                             const ageDiff = point.age - prevAge;
-                            const emoji = ageDiff === 1 ? '🔼' : '🚫';
+                            const emoji = ageDiff === 1 ? '📈' : '🛑';
                             changeText = `${emoji} +${ageDiff}`;
                         } else if (point.age < prevAge) {
                             changeText = `⚠️ ${point.age - prevAge}`;
@@ -8891,7 +8891,7 @@ function createTimelineEntry(point, idx, prevAge, trackedSubs) {
     } else if (point.age > prevAge) {
         entryClass = 'age-increase';
         const ageDiff = point.age - prevAge;
-        const emoji = ageDiff === 1 ? '🔼' : '🚫';
+        const emoji = ageDiff === 1 ? '📈' : '🛑';
         changeText = `${emoji} +${ageDiff}`;
     } else if (point.age < prevAge) {
         entryClass = 'age-decrease';
