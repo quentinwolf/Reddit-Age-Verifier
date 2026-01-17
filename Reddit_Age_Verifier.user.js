@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.69
+// @version      1.70
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -105,6 +105,8 @@ const DEFAULT_SETTINGS = {
     paginationLimit: 250,
     trackedSubreddits: [], // subreddits to compare age behavior against
     minCouplesAgeGap: 10, // minimum age gap (years) to detect couples accounts
+    timelineContextPosts: 1, // to provide surrounding context when compressing posts in the Deep Analysis Age Timeline
+    timelineCompressionThreshold: 5, // threshold to compress additional posts with the same age in the Deep Analysis Age Timeline
     commonBots: {
         'AutoModerator': true,
         'RepostSleuthBot': true,
@@ -1037,6 +1039,7 @@ GM_addStyle(`
     .timeline-change {
         color: var(--av-text-muted);
         font-size: 12px;
+        margin-left: 6px;
         min-width: 50px;
     }
 
@@ -2582,8 +2585,29 @@ function showSettingsModal() {
                     <input type="number" class="age-settings-numberinput" id="setting-min-couples-gap"
                            value="${userSettings.minCouplesAgeGap}" min="4" max="10" step="1">
                 </div>
+
                 <span class="age-settings-help-text" style="display: block; margin-top: -8px; margin-bottom: 12px;">
                     Lower values (4-6) detect closer-age couples, higher (8-10) reduce false positives. Minimum: 4 years.
+                </span>
+
+                <div class="age-settings-row">
+                    <label class="age-settings-label">Deep Analysis Timeline Context Posts (1-5):</label>
+                    <input type="number" class="age-settings-numberinput" id="setting-timeline-context"
+                           value="${userSettings.timelineContextPosts}" min="1" max="5">
+                </div>
+
+                <span class="age-settings-help-text" style="display: block; margin-top: -8px; margin-bottom: 12px;">
+                    Number of posts to show before/after age changes in timeline
+                </span>
+
+                <div class="age-settings-row">
+                    <label class="age-settings-label">Timeline Compression Threshold (5-20):</label>
+                    <input type="number" class="age-settings-numberinput" id="setting-timeline-threshold"
+                           value="${userSettings.timelineCompressionThreshold}" min="5" max="20">
+                </div>
+
+                <span class="age-settings-help-text" style="display: block; margin-top: -8px; margin-bottom: 12px;">
+                    Minimum consecutive same-age posts before compressing. Lower = more aggressive compression.
                 </span>
 
                 <div class="age-settings-row">
@@ -2834,6 +2858,12 @@ function showSettingsModal() {
         const minCouplesGapInput = parseInt(modal.querySelector('#setting-min-couples-gap').value);
         const minCouplesGapValidated = Math.max(4, Math.min(10, minCouplesGapInput)); // Clamp to 4-10
 
+        const timelineContextInput = parseInt(modal.querySelector('#setting-timeline-context').value);
+        const timelineContextValidated = Math.max(1, Math.min(5, timelineContextInput)); // Clamp to 1-5
+
+        const timelineThresholdInput = parseInt(modal.querySelector('#setting-timeline-threshold').value);
+        const timelineThresholdValidated = Math.max(5, Math.min(20, timelineThresholdInput)); // Clamp to 5-20
+
         const customColors = {};
         modal.querySelectorAll('.custom-color-input').forEach(input => {
             customColors[input.dataset.colorKey] = input.value;
@@ -2863,6 +2893,8 @@ function showSettingsModal() {
             showRestoreButtons: modal.querySelector('#showRestoreButtons').checked,
             autoRestoreDeletedAuthors: modal.querySelector('#autoRestoreDeletedAuthors').checked,
             minCouplesAgeGap: minCouplesGapValidated,
+            timelineContextPosts: timelineContextValidated,
+            timelineCompressionThreshold: timelineThresholdValidated,
             customButtons: [],
             commonBots: {}
         };
@@ -8658,13 +8690,20 @@ function buildTimelineFull(analysis, trackedSubs) {
 
 function buildTimelineCompressed(analysis, trackedSubs) {
     const timeline = analysis.timeline;
-    const displayEntries = [];
     const maxVisibleRows = 150;
-    const contextPosts = 3; // Posts to show before/after age changes
+    const contextPosts = userSettings.timelineContextPosts || 3;
+    const shownIndices = new Set(); // Track which indices we've already displayed
+    const displayEntries = [];
 
     let i = 0;
 
     while (i < timeline.length) {
+        // Skip if already shown
+        if (shownIndices.has(i)) {
+            i++;
+            continue;
+        }
+
         const point = timeline[i];
         const prevAge = i > 0 ? timeline[i - 1].age : null;
 
@@ -8677,25 +8716,32 @@ function buildTimelineCompressed(analysis, trackedSubs) {
             if (isAgeChange) {
                 const contextStart = Math.max(0, i - contextPosts);
                 for (let j = contextStart; j < i; j++) {
-                    const contextPoint = timeline[j];
-                    const contextPrevAge = j > 0 ? timeline[j - 1].age : null;
-                    const entry = createTimelineEntry(contextPoint, j, contextPrevAge, trackedSubs);
-                    displayEntries.push({ html: entry.html, index: j, isCompressed: false });
+                    if (!shownIndices.has(j)) {
+                        const contextPoint = timeline[j];
+                        const contextPrevAge = j > 0 ? timeline[j - 1].age : null;
+                        const entry = createTimelineEntry(contextPoint, j, contextPrevAge, trackedSubs);
+                        displayEntries.push({ html: entry.html, index: j, isCompressed: false });
+                        shownIndices.add(j);
+                    }
                 }
             }
 
             // Show the age change post (or first post)
             const entry = createTimelineEntry(point, i, prevAge, trackedSubs);
             displayEntries.push({ html: entry.html, index: i, isCompressed: false });
+            shownIndices.add(i);
             i++;
 
             // Show context posts AFTER the age change
             const afterContextEnd = Math.min(i + contextPosts, timeline.length);
             for (let j = i; j < afterContextEnd; j++) {
-                const contextPoint = timeline[j];
-                const contextPrevAge = timeline[j - 1].age;
-                const entry = createTimelineEntry(contextPoint, j, contextPrevAge, trackedSubs);
-                displayEntries.push({ html: entry.html, index: j, isCompressed: false });
+                if (!shownIndices.has(j)) {
+                    const contextPoint = timeline[j];
+                    const contextPrevAge = timeline[j - 1].age;
+                    const entry = createTimelineEntry(contextPoint, j, contextPrevAge, trackedSubs);
+                    displayEntries.push({ html: entry.html, index: j, isCompressed: false });
+                    shownIndices.add(j);
+                }
             }
             i = afterContextEnd;
         } else {
@@ -8709,26 +8755,33 @@ function buildTimelineCompressed(analysis, trackedSubs) {
 
             const stableLength = stableAgeEnd - stableAgeStart;
 
-            // If stable period is short (<15 posts), show all
-            if (stableLength < 15) {
+            // If stable period is short, show all
+            const compressionThreshold = userSettings.timelineCompressionThreshold || 10;
+            if (stableLength < compressionThreshold) {
                 for (let j = stableAgeStart; j < stableAgeEnd; j++) {
-                    const p = timeline[j];
-                    const pPrevAge = j > 0 ? timeline[j - 1].age : null;
-                    const entry = createTimelineEntry(p, j, pPrevAge, trackedSubs);
-                    displayEntries.push({ html: entry.html, index: j, isCompressed: false });
+                    if (!shownIndices.has(j)) {
+                        const p = timeline[j];
+                        const pPrevAge = j > 0 ? timeline[j - 1].age : null;
+                        const entry = createTimelineEntry(p, j, pPrevAge, trackedSubs);
+                        displayEntries.push({ html: entry.html, index: j, isCompressed: false });
+                        shownIndices.add(j);
+                    }
                 }
                 i = stableAgeEnd;
             } else {
                 // Long stable period - compress the middle
-                const showFirst = 3; // Show first 3 posts of stable period
-                const showLast = 3;  // Show last 3 posts of stable period
+                const showFirst = 2; // Show first 2 posts of stable period
+                const showLast = 2;  // Show last 2 posts of stable period
 
                 // Show first N posts
                 for (let j = stableAgeStart; j < Math.min(stableAgeStart + showFirst, stableAgeEnd); j++) {
-                    const p = timeline[j];
-                    const pPrevAge = j > 0 ? timeline[j - 1].age : null;
-                    const entry = createTimelineEntry(p, j, pPrevAge, trackedSubs);
-                    displayEntries.push({ html: entry.html, index: j, isCompressed: false });
+                    if (!shownIndices.has(j)) {
+                        const p = timeline[j];
+                        const pPrevAge = j > 0 ? timeline[j - 1].age : null;
+                        const entry = createTimelineEntry(p, j, pPrevAge, trackedSubs);
+                        displayEntries.push({ html: entry.html, index: j, isCompressed: false });
+                        shownIndices.add(j);
+                    }
                 }
 
                 // Create compression row for the middle
@@ -8774,14 +8827,22 @@ function buildTimelineCompressed(analysis, trackedSubs) {
                         startDate: startDate,
                         endDate: endDate
                     });
+
+                    // Mark compressed range as shown
+                    for (let j = compressStart; j < compressEnd; j++) {
+                        shownIndices.add(j);
+                    }
                 }
 
                 // Show last N posts
                 for (let j = Math.max(compressEnd, stableAgeStart + showFirst); j < stableAgeEnd; j++) {
-                    const p = timeline[j];
-                    const pPrevAge = timeline[j - 1].age;
-                    const entry = createTimelineEntry(p, j, pPrevAge, trackedSubs);
-                    displayEntries.push({ html: entry.html, index: j, isCompressed: false });
+                    if (!shownIndices.has(j)) {
+                        const p = timeline[j];
+                        const pPrevAge = timeline[j - 1].age;
+                        const entry = createTimelineEntry(p, j, pPrevAge, trackedSubs);
+                        displayEntries.push({ html: entry.html, index: j, isCompressed: false });
+                        shownIndices.add(j);
+                    }
                 }
 
                 i = stableAgeEnd;
