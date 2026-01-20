@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.73
+// @version      1.74
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -6601,7 +6601,63 @@ function escapeRegExp(string) {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function showManualSearchModal(prefillAuthor = null) {
+/**
+ * Extract submission title and subreddit from the DOM context of a button
+ * @param {HTMLElement} buttonElement - The age check button element
+ * @returns {Object|null} - {title: string, subreddit: string} or null if extraction fails
+ */
+function extractSubmissionContext(buttonElement) {
+    try {
+        let thingContainer = buttonElement.closest('div.thing');
+
+        if (!thingContainer) {
+            console.warn('Could not find thing container for submission context');
+            return null;
+        }
+
+        const titleElement = thingContainer.querySelector('p.title > a.title');
+        const title = titleElement ? titleElement.textContent.trim() : null;
+
+        if (!title) {
+            console.warn('Could not extract submission title');
+            return null;
+        }
+
+        const commentsLink = thingContainer.querySelector('ul.flat-list.buttons > li.first > a');
+
+        if (!commentsLink || !commentsLink.href) {
+            console.warn('Could not find comments link for subreddit extraction');
+            return null;
+        }
+
+        const subredditMatch = commentsLink.href.match(/\/r\/([^\/]+)\//);
+        const subreddit = subredditMatch ? subredditMatch[1] : null;
+
+        if (!subreddit) {
+            console.warn('Could not extract subreddit from comments link');
+            return null;
+        }
+
+        return { title, subreddit };
+
+    } catch (error) {
+        console.error('Error extracting submission context:', error);
+        return null;
+    }
+}
+
+function showManualSearchModal(options = {}) {
+    const prefillOptions = typeof options === 'string'
+        ? { username: options }
+        : options;
+
+    const {
+        username = null,
+        subreddit = null,
+        searchType = 'comment',
+        searchInput = null
+    } = prefillOptions;
+
     const modalId = `age-modal-${modalCounter++}`;
 
     const modal = document.createElement('div');
@@ -6624,12 +6680,12 @@ function showManualSearchModal(prefillAuthor = null) {
                     <div class="manual-search-field">
                         <label class="manual-search-label">Username</label>
                         <input type="text" class="manual-search-input" id="ms-author"
-                               value="${prefillAuthor || ''}" placeholder="Enter username">
+                               value="${username || ''}" placeholder="Enter username">
                     </div>
                     <div class="manual-search-field">
                         <label class="manual-search-label">Subreddit</label>
                         <input type="text" class="manual-search-input" id="ms-subreddit"
-                               placeholder="Enter subreddit">
+                               value="${subreddit || ''}" placeholder="Enter subreddit">
                     </div>
                 </div>
 
@@ -6637,8 +6693,8 @@ function showManualSearchModal(prefillAuthor = null) {
                     <div class="manual-search-field">
                         <label class="manual-search-label">Search For</label>
                         <select class="manual-search-select" id="ms-kind">
-                            <option value="comment">Comments</option>
-                            <option value="submission">Posts</option>
+                            <option value="comment" ${searchType === 'comment' ? 'selected' : ''}>Comments</option>
+                            <option value="submission" ${searchType === 'submission' ? 'selected' : ''}>Posts</option>
                         </select>
                     </div>
                     <div class="manual-search-field">
@@ -6672,7 +6728,7 @@ function showManualSearchModal(prefillAuthor = null) {
                 <div class="manual-search-field">
                     <label class="manual-search-label">Search Input</label>
                     <input type="text" class="manual-search-input" id="ms-query"
-                           placeholder="Query or Reddit Object Fullname">
+                               value="${searchInput || ''}" placeholder="Keywords to search for">
                 </div>
 
                 <div class="manual-search-checkbox-group">
@@ -6761,7 +6817,7 @@ function showManualSearchModal(prefillAuthor = null) {
     const newSearchBtn = modal.querySelector('#new-manual-search');
     newSearchBtn.onclick = () => {
         const currentAuthor = modal.querySelector('#ms-author').value.trim();
-        showManualSearchModal(currentAuthor || params.author);
+        showManualSearchModal({ username: currentAuthor || params.author });
     };
 }
 
@@ -7939,7 +7995,7 @@ function showDeepAnalysisModal(username, ageData, analysis) {
 
     const manualSearchBtn = modal.querySelector('.manual-search-deep');
     manualSearchBtn.onclick = () => {
-        showManualSearchModal(username);
+        showManualSearchModal({ username });
     };
 
     // Attach custom button handlers
@@ -9493,6 +9549,10 @@ function showContextMenu(event, username) {
             <span>🔍</span>
             <span>Manual Search</span>
         </div>
+        <div class="age-context-menu-item" data-action="search-title">
+            <span>🔎</span>
+            <span>Search Title</span>
+        </div>
         <div class="age-context-menu-item" data-action="deep-analysis">
             <span>📊</span>
             <span>Deep Analysis</span>
@@ -9563,7 +9623,23 @@ function showContextMenu(event, username) {
                     break;
 
                 case 'manual-search':
-                    showManualSearchModal(username);
+                    showManualSearchModal({ username });
+                    break;
+
+                case 'search-title':
+                    const button = document.querySelector(`.age-check-button[data-username="${username}"]`);
+                    if (button) {
+                        const context = extractSubmissionContext(button);
+                        if (context) {
+                            showManualSearchModal({
+                                subreddit: context.subreddit,
+                                searchType: 'submission',
+                                searchInput: context.title
+                            });
+                        } else {
+                            alert('Could not extract submission title and subreddit. This feature only works on submission pages.');
+                        }
+                    }
                     break;
 
                 case 'deep-analysis':
