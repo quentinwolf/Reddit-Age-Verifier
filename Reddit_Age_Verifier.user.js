@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.76
+// @version      1.77
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -6616,12 +6616,17 @@ function extractSubmissionContext(buttonElement) {
         }
 
         const titleElement = thingContainer.querySelector('p.title > a.title');
-        const title = titleElement ? titleElement.textContent.trim() : null;
+        let title = titleElement ? titleElement.textContent.trim() : null;
 
         if (!title) {
             console.warn('Could not extract submission title');
             return null;
         }
+
+        // Strip punctuation to improve search matching
+        title = title.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()'"?]/g, ' ')
+                     .replace(/\s+/g, ' ')  // Replace multiple spaces with single space
+                     .trim();
 
         const commentsLink = thingContainer.querySelector('ul.flat-list.buttons > li.first > a');
 
