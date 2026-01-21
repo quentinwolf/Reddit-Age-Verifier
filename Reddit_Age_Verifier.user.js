@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.75
+// @version      1.76
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -6655,7 +6655,8 @@ function showManualSearchModal(options = {}) {
         username = null,
         subreddit = null,
         searchType = 'comment',
-        searchInput = null
+        searchInput = null,
+        autoExecute = false
     } = prefillOptions;
 
     const modalId = `age-modal-${modalCounter++}`;
@@ -6813,6 +6814,11 @@ function showManualSearchModal(options = {}) {
 
     searchBtn.onclick = executeSearch;
     form.onsubmit = executeSearch;
+
+    // Auto-execute search if requested
+    if (autoExecute) {
+        setTimeout(() => executeSearch(), 100); // Small delay to ensure modal is fully rendered
+    }
 
     const newSearchBtn = modal.querySelector('#new-manual-search');
     newSearchBtn.onclick = () => {
@@ -9633,7 +9639,8 @@ function showContextMenu(event, username, buttonElement = null) {
                             showManualSearchModal({
                                 subreddit: context.subreddit,
                                 searchType: 'submission',
-                                searchInput: context.title
+                                searchInput: context.title,
+                                autoExecute: true
                             });
                         } else {
                             alert('Could not extract submission title and subreddit. This feature only works on submission pages.');
