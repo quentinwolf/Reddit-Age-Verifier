@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.74
+// @version      1.75
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -9299,7 +9299,7 @@ function displayRestoredAuthor(authorElement, username) {
     // Right-click context menu (same as regular buttons)
     pushShiftBtn.oncontextmenu = (e) => {
         e.preventDefault();
-        showContextMenu(e, username);
+        showContextMenu(e, username, pushShiftBtn);
     };
 
     // Replace the [deleted] element and add button
@@ -9516,7 +9516,7 @@ async function handleAgeCheck(username) {
 
 let activeContextMenu = null;
 
-function showContextMenu(event, username) {
+function showContextMenu(event, username, buttonElement = null) {
     event.preventDefault();
 
     // Close any existing context menu
@@ -9627,9 +9627,8 @@ function showContextMenu(event, username) {
                     break;
 
                 case 'search-title':
-                    const button = document.querySelector(`.age-check-button[data-username="${username}"]`);
-                    if (button) {
-                        const context = extractSubmissionContext(button);
+                    if (buttonElement) {
+                        const context = extractSubmissionContext(buttonElement);
                         if (context) {
                             showManualSearchModal({
                                 subreddit: context.subreddit,
@@ -9824,7 +9823,7 @@ function createAgeCheckButton(username) {
     // Right-click context menu
     button.oncontextmenu = (e) => {
         e.preventDefault();
-        showContextMenu(e, username);
+        showContextMenu(e, username, button);
     };
 
     return button;
