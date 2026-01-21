@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.78
+// @version      1.79
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -9316,6 +9316,139 @@ function displayRestoredAuthor(authorElement, username) {
     // Replace the [deleted] element and add button
     authorElement.parentNode.replaceChild(restoredSpan, authorElement);
     restoredSpan.parentNode.insertBefore(pushShiftBtn, restoredSpan.nextSibling);
+
+    // Extract subreddit and add toolbox buttons (use restoredSpan for context)
+    const subreddit = extractSubredditFromContext(restoredSpan);
+    if (subreddit) {
+        const thingId = extractThingId(restoredSpan);
+        logDebug('Creating toolbox buttons - thingId:', thingId, 'subreddit:', subreddit);
+
+        // Check if toolbox already created a placeholder
+        const existingToolboxContainer = pushShiftBtn.parentNode.querySelector('.tb-jsapi-author-container');
+        const existingEmptySpan = existingToolboxContainer?.querySelector('span[data-name="toolbox"]');
+
+        if (existingEmptySpan && existingToolboxContainer) {
+            // Populate the existing empty span instead of creating new container
+            logDebug('Found existing toolbox placeholder, populating it');
+            const populatedSpan = createToolboxButtonsInner(username, subreddit, restoredSpan, thingId);
+            existingEmptySpan.parentNode.replaceChild(populatedSpan, existingEmptySpan);
+        } else if (existingToolboxContainer) {
+            // Container exists but no empty span - replace entire container
+            logDebug('Found existing toolbox container without placeholder, replacing it');
+            const toolboxContainer = createToolboxButtons(username, subreddit, restoredSpan, thingId);
+            existingToolboxContainer.parentNode.replaceChild(toolboxContainer, existingToolboxContainer);
+        } else {
+            // No existing container, insert new one
+            logDebug('No existing toolbox container, creating new one');
+            const toolboxContainer = createToolboxButtons(username, subreddit, restoredSpan, thingId);
+            pushShiftBtn.parentNode.insertBefore(toolboxContainer, pushShiftBtn.nextSibling);
+        }
+    }
+}
+
+// Extract subreddit from page context for toolbox buttons
+function extractSubredditFromContext(authorElement) {
+    // Strategy 1: Try to get from URL
+    const urlMatch = window.location.pathname.match(/\/r\/([^\/]+)\//);
+    if (urlMatch) {
+        return urlMatch[1];
+    }
+
+    // Strategy 2: Try to get from parent element's permalink
+    const parent = authorElement.closest('[data-permalink]');
+    if (parent && parent.dataset.permalink) {
+        const permalinkMatch = parent.dataset.permalink.match(/\/r\/([^\/]+)\//);
+        if (permalinkMatch) {
+            return permalinkMatch[1];
+        }
+    }
+
+    // Strategy 3: Try to find comments link in the thing container
+    const thingContainer = authorElement.closest('div.thing');
+    if (thingContainer) {
+        const commentsLink = thingContainer.querySelector('ul.flat-list.buttons > li.first > a');
+        if (commentsLink && commentsLink.href) {
+            const commentsMatch = commentsLink.href.match(/\/r\/([^\/]+)\//);
+            if (commentsMatch) {
+                return commentsMatch[1];
+            }
+        }
+    }
+
+    logDebug('Could not extract subreddit for toolbox buttons');
+    return null;
+}
+
+// Create just the inner toolbox span with buttons (for populating existing containers)
+function createToolboxButtonsInner(username, subreddit, authorElement, thingId) {
+    const tbInner = document.createElement('span');
+    tbInner.setAttribute('data-name', 'toolbox');
+    // Detect if this is a submission (t3_) or comment (t1_)
+    const tbType = thingId && thingId.startsWith('t3_') ? 'TBpostAuthor' : 'TBcommentAuthor';
+    tbInner.setAttribute('data-tb-type', tbType);
+    tbInner.className = 'tb-frontend-container ut-thing';
+    tbInner.setAttribute('data-subreddit', subreddit);
+    tbInner.setAttribute('data-author', username);
+
+    // Create M button (mod actions)
+    const modBtn = document.createElement('a');
+    modBtn.href = 'javascript:;';
+    modBtn.title = 'Perform various mod actions on this user';
+    modBtn.className = 'global-mod-button tb-bracket-button';
+    modBtn.setAttribute('data-subreddit', subreddit);
+    modBtn.setAttribute('data-author', username);
+    if (thingId) {
+        modBtn.setAttribute('data-parentid', thingId);
+    }
+    modBtn.textContent = 'M';
+
+    // Create H button (history)
+    const historyBtn = document.createElement('a');
+    historyBtn.href = 'javascript:;';
+    historyBtn.className = 'user-history-button tb-bracket-button';
+    historyBtn.setAttribute('data-author', username);
+    historyBtn.setAttribute('data-subreddit', subreddit);
+    historyBtn.title = 'view & analyze user\'s submission and comment history';
+    historyBtn.textContent = 'H';
+
+    // Create N button (notes)
+    const notesBtn = document.createElement('a');
+    notesBtn.href = 'javascript:;';
+    notesBtn.id = 'add-user-tag';
+    notesBtn.className = 'tb-bracket-button tb-usernote-button add-usernote-' + subreddit;
+    notesBtn.setAttribute('data-author', username);
+    notesBtn.setAttribute('data-subreddit', subreddit);
+    notesBtn.setAttribute('data-default-text', 'N');
+    notesBtn.textContent = 'N';
+
+    // Create P button (profile)
+    const profileBtn = document.createElement('a');
+    profileBtn.href = 'javascript:;';
+    profileBtn.className = 'tb-user-profile tb-bracket-button';
+    profileBtn.setAttribute('data-listing', 'overview');
+    profileBtn.setAttribute('data-user', username);
+    profileBtn.setAttribute('data-subreddit', subreddit);
+    profileBtn.title = 'view & filter user\'s profile in toolbox overlay';
+    profileBtn.textContent = 'P';
+
+    // Append all buttons to inner container
+    tbInner.appendChild(modBtn);
+    tbInner.appendChild(historyBtn);
+    tbInner.appendChild(notesBtn);
+    tbInner.appendChild(profileBtn);
+
+    return tbInner;
+}
+
+// Create toolbox buttons container (full container with inner span)
+function createToolboxButtons(username, subreddit, authorElement, thingId) {
+    const toolboxContainer = document.createElement('span');
+    toolboxContainer.className = 'tb-jsapi-author-container';
+
+    const tbInner = createToolboxButtonsInner(username, subreddit, authorElement, thingId);
+    toolboxContainer.appendChild(tbInner);
+
+    return toolboxContainer;
 }
 
 // ============================================================================
