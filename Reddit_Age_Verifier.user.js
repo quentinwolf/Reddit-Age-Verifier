@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.77
+// @version      1.78
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -9540,6 +9540,9 @@ function showContextMenu(event, username, buttonElement = null) {
 
     const cached = getCachedAgeData(username);
 
+    // Check if we can extract submission context for "Search Title" option
+    const canSearchTitle = buttonElement ? extractSubmissionContext(buttonElement) !== null : false;
+
     // Build custom buttons section
     const customButtons = userSettings.customButtons.filter(btn => btn.enabled && btn.showInContextMenu);
     const customButtonsHTML = customButtons.length > 0 ? `
@@ -9560,10 +9563,12 @@ function showContextMenu(event, username, buttonElement = null) {
             <span>🔍</span>
             <span>Manual Search</span>
         </div>
+        ${canSearchTitle ? `
         <div class="age-context-menu-item" data-action="search-title">
             <span>🔎</span>
             <span>Search Title</span>
         </div>
+        ` : ''}
         <div class="age-context-menu-item" data-action="deep-analysis">
             <span>📊</span>
             <span>Deep Analysis</span>
