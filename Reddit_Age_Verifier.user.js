@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.79
+// @version      1.80
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -104,7 +104,8 @@ const DEFAULT_SETTINGS = {
     modalHeight: 900, // default results modal height in pixels
     paginationLimit: 250,
     trackedSubreddits: [], // subreddits to compare age behavior against
-    minCouplesAgeGap: 10, // minimum age gap (years) to detect couples accounts
+    minPotentialAge: 25,
+    minCouplesAgeGap: 6, // minimum age gap (years) to detect couples accounts
     timelineContextPosts: 1, // to provide surrounding context when compressing posts in the Deep Analysis Age Timeline
     timelineCompressionThreshold: 5, // threshold to compress additional posts with the same age in the Deep Analysis Age Timeline
     timelineCompressionMinEntries: 50, // minimum timeline entries before compression is enabled
@@ -2582,6 +2583,16 @@ function showSettingsModal() {
                 </div>
 
                 <div class="age-settings-row">
+                    <label class="age-settings-label">Minimum Potential Age for Analysis (years)</label>
+                    <input type="number" class="age-settings-numberinput" id="setting-min-potential-age"
+                           value="${userSettings.minPotentialAge}" min="20" max="35" step="1">
+                </div>
+
+                <span class="age-settings-help-text" style="display: block; margin-top: -8px; margin-bottom: 12px;">
+                    Only potential ages (non-bracketed) at or above this threshold will be included in Deep Analysis. Lower values may include false positives.
+                </span>
+
+                <div class="age-settings-row">
                     <label class="age-settings-label">Minimum Age Gap for Couples Detection (years)</label>
                     <input type="number" class="age-settings-numberinput" id="setting-min-couples-gap"
                            value="${userSettings.minCouplesAgeGap}" min="4" max="10" step="1">
@@ -2899,6 +2910,7 @@ function showSettingsModal() {
             modalWidth: parseInt(modal.querySelector('#setting-modal-width').value),
             modalHeight: parseInt(modal.querySelector('#setting-modal-height').value),
             paginationLimit: parseInt(modal.querySelector('#setting-pagination-limit').value),
+            minPotentialAge: parseInt(modal.querySelector('#setting-min-potential-age').value),
             showAgeEstimation: modal.querySelector('#setting-show-estimation').checked,
             defaultSort: modal.querySelector('#setting-sort-order').value,
             autoFilterPosted: modal.querySelector('#setting-auto-filter').checked,
@@ -3886,6 +3898,7 @@ function performDeepAnalysis(ageData, username) {
         totalPosts: ageData.results.length,
         postedAges: ageData.postedAges,
         possibleAges: ageData.possibleAges,
+        filteredPossibleAges: ageData.possibleAges.filter(age => age >= userSettings.minPotentialAge),
         timeline: [],
         backwardsAging: [],
         subredditComparison: {
@@ -3900,18 +3913,35 @@ function performDeepAnalysis(ageData, username) {
         consistencyScore: 0
     };
 
-    // Build timeline from results (only posted ages)
+    // Build timeline from results (posted + filtered potential ages)
     const timelinePoints = [];
     ageData.results.forEach(result => {
+        // Add confirmed posted ages
         if (result.postedAges && result.postedAges.length > 0) {
             result.postedAges.forEach(age => {
                 timelinePoints.push({
                     timestamp: result.timestamp,
                     date: result.date,
                     age: age,
+                    isPotential: false,
                     subreddit: result.subreddit.toLowerCase(),
                     permalink: result.permalink
                 });
+            });
+        }
+        // Add potential ages if they meet threshold and aren't already posted
+        if (result.possibleAges && result.possibleAges.length > 0) {
+            result.possibleAges.forEach(age => {
+                if (age >= userSettings.minPotentialAge && !result.postedAges.includes(age)) {
+                    timelinePoints.push({
+                        timestamp: result.timestamp,
+                        date: result.date,
+                        age: age,
+                        isPotential: true,
+                        subreddit: result.subreddit.toLowerCase(),
+                        permalink: result.permalink
+                    });
+                }
             });
         }
     });
@@ -4059,10 +4089,14 @@ function analyzeSubredditBehavior(timelinePoints, trackedSubs) {
         otherAgeRange: null
     };
 
+    // Helper to extract numeric age from string (handles "~25" and "25")
+    const extractNumericAge = (ageStr) => parseInt(ageStr.toString().replace('~', ''));
+
     if (trackedLower.length === 0) {
         // No tracked subs configured
         timelinePoints.forEach(point => {
-            result.other.ages.add(point.age);
+            const ageKey = point.isPotential ? `~${point.age}` : `${point.age}`;
+            result.other.ages.add(ageKey);
             result.other.posts.push(point);
             result.other.subreddits.add(point.subreddit);
         });
@@ -4071,43 +4105,45 @@ function analyzeSubredditBehavior(timelinePoints, trackedSubs) {
 
     timelinePoints.forEach(point => {
         const isTracked = trackedLower.includes(point.subreddit);
+        const ageKey = point.isPotential ? `~${point.age}` : `${point.age}`;
+
         if (isTracked) {
-            result.tracked.ages.add(point.age);
-            result.tracked.posts.push(point);
+            result.tracked.ages.add(ageKey);
             result.tracked.subreddits.add(point.subreddit);
+            result.tracked.posts.push(point);
         } else {
-            result.other.ages.add(point.age);
-            result.other.posts.push(point);
+            result.other.ages.add(ageKey);
             result.other.subreddits.add(point.subreddit);
+            result.other.posts.push(point);
         }
     });
 
     // Convert Sets to arrays for comparison
-    const trackedAges = Array.from(result.tracked.ages).sort((a, b) => a - b);
-    const otherAges = Array.from(result.other.ages).sort((a, b) => a - b);
+    const trackedAges = Array.from(result.tracked.ages).sort((a, b) => extractNumericAge(a) - extractNumericAge(b));
+    const otherAges = Array.from(result.other.ages).sort((a, b) => extractNumericAge(a) - extractNumericAge(b));
 
     if (trackedAges.length > 0) {
         result.trackedAgeRange = {
-            min: Math.min(...trackedAges),
-            max: Math.max(...trackedAges),
+            min: Math.min(...trackedAges.map(extractNumericAge)),
+            max: Math.max(...trackedAges.map(extractNumericAge)),
             ages: trackedAges
         };
     }
 
     if (otherAges.length > 0) {
         result.otherAgeRange = {
-            min: Math.min(...otherAges),
-            max: Math.max(...otherAges),
+            min: Math.min(...otherAges.map(extractNumericAge)),
+            max: Math.max(...otherAges.map(extractNumericAge)),
             ages: otherAges
         };
     }
 
     // Check for discrepancies
     if (trackedAges.length > 0 && otherAges.length > 0) {
-        const trackedMin = Math.min(...trackedAges);
-        const trackedMax = Math.max(...trackedAges);
-        const otherMin = Math.min(...otherAges);
-        const otherMax = Math.max(...otherAges);
+        const trackedMin = Math.min(...trackedAges.map(extractNumericAge));
+        const trackedMax = Math.max(...trackedAges.map(extractNumericAge));
+        const otherMin = Math.min(...otherAges.map(extractNumericAge));
+        const otherMax = Math.max(...otherAges.map(extractNumericAge));
 
         // Check if they're posting older on tracked subs
         if (trackedMin > otherMax) {
@@ -8343,8 +8379,14 @@ function buildOverviewSection(analysis) {
                 </div>
                 <div class="analysis-stat-row">
                     <span class="analysis-stat-label">Possible Ages (not bracketed)</span>
-                    <span class="analysis-stat-value">${analysis.possibleAges.length > 0 ? analysis.possibleAges.join(', ') : 'None'}</span>
+                    <span class="analysis-stat-value">${analysis.filteredPossibleAges.length > 0 ? analysis.filteredPossibleAges.map(age => `~${age}`).join(', ') : 'None'}</span>
                 </div>
+                ${analysis.possibleAges.length > analysis.filteredPossibleAges.length ? `
+                <div class="analysis-stat-row">
+                    <span class="analysis-stat-label" style="font-size: 11px; color: var(--av-text-muted);">Excluded (below threshold)</span>
+                    <span class="analysis-stat-value" style="font-size: 11px; color: var(--av-text-muted);">${analysis.possibleAges.filter(age => age < userSettings.minPotentialAge).join(', ')}</span>
+                </div>
+                ` : ''}
                 ${extremes ? `
                 <div class="analysis-stat-row">
                     <span class="analysis-stat-label">Age Range</span>
@@ -8968,6 +9010,9 @@ function createTimelineEntry(point, idx, prevAge, trackedSubs) {
     let entryClass = 'age-same';
     let changeText = '';
 
+    const agePrefix = point.isPotential ? '~' : '';
+    const ageDisplay = `${agePrefix}${point.age}`;
+
     if (idx === 0 || prevAge === null) {
         entryClass = 'first-post';
         changeText = '(First)';
@@ -8986,13 +9031,15 @@ function createTimelineEntry(point, idx, prevAge, trackedSubs) {
     const isTracked = trackedSubs.includes(point.subreddit.toLowerCase());
     const trackedStyle = isTracked ? 'font-weight: bold;' : '';
 
+    const potentialStyle = point.isPotential ? 'opacity: 0.75; font-style: italic;' : '';
+
     const html = `
         <div class="timeline-entry ${entryClass}">
             <span class="timeline-date">${new Date(point.timestamp * 1000).toLocaleDateString('en-US', {
                 year: 'numeric', month: 'short', day: 'numeric'
             })}</span>
-            <span class="timeline-age" style="color: ${entryClass === 'age-decrease' ? '#ff6b6b' : 'var(--av-text)'};">
-                Age: <a href="${point.permalink}" target="_blank" style="color: inherit; text-decoration: underline;">${point.age}</a>
+            <span class="timeline-age" style="color: ${entryClass === 'age-decrease' ? '#ff6b6b' : 'var(--av-text)'}; ${potentialStyle}">
+                Age: <a href="${point.permalink}" target="_blank" style="color: inherit; text-decoration: underline;">${ageDisplay}</a>
             </span>
             <span class="timeline-change">${changeText}</span>
             <span class="timeline-subreddit" style="${trackedStyle}"><a href="https://old.reddit.com/r/${point.subreddit}" target="_blank" style="color: var(--av-link);">r/${point.subreddit}</a></span>
