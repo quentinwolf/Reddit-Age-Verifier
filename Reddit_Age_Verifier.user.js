@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.839
+// @version      1.841
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -1425,9 +1425,38 @@ function logDebug(...args) {
 }
 
 // Function to show floating notification banner
-function showNotificationBanner(message, duration = 3000) {
-    // Remove any existing banner
+function showNotificationBanner(message, duration = 3000, update = false) {
     const existingBanner = document.querySelector('.settings-notification-banner');
+
+    if (update && existingBanner) {
+        // Update existing banner text
+        const textSpan = existingBanner.querySelector('span:last-child');
+        if (textSpan) {
+            textSpan.textContent = message;
+        }
+
+        // Clear any existing timeout and set new one if duration is specified
+        if (existingBanner.hideTimeout) {
+            clearTimeout(existingBanner.hideTimeout);
+        }
+
+        if (duration > 0) {
+            existingBanner.hideTimeout = setTimeout(() => {
+                existingBanner.classList.add('hide');
+                existingBanner.classList.remove('show');
+
+                setTimeout(() => {
+                    if (existingBanner.parentNode) {
+                        existingBanner.remove();
+                    }
+                }, 300);
+            }, duration);
+        }
+
+        return;
+    }
+
+    // Remove any existing banner if not updating
     if (existingBanner) {
         existingBanner.remove();
     }
@@ -1447,18 +1476,20 @@ function showNotificationBanner(message, duration = 3000) {
         banner.classList.add('show');
     });
 
-    // Auto-hide after duration
-    setTimeout(() => {
-        banner.classList.add('hide');
-        banner.classList.remove('show');
+    // Auto-hide after duration (if duration > 0)
+    if (duration > 0) {
+        banner.hideTimeout = setTimeout(() => {
+            banner.classList.add('hide');
+            banner.classList.remove('show');
 
-        // Remove from DOM after animation completes
-        setTimeout(() => {
-            if (banner.parentNode) {
-                banner.remove();
-            }
-        }, 300);
-    }, duration);
+            // Remove from DOM after animation completes
+            setTimeout(() => {
+                if (banner.parentNode) {
+                    banner.remove();
+                }
+            }, 300);
+        }, duration);
+    }
 }
 
 // ============================================================================
@@ -9378,35 +9409,76 @@ function showRestoreContextMenu(event, button) {
 // Restore all deleted authors and content on the page
 async function restoreAll() {
     if (!apiToken) {
-        alert('Please authenticate with PushShift first. Click any Restore button to begin authentication.');
+        showNotificationBanner('Fetching API token... Please authorize when prompted.', 4000);
+        attemptAutoFetchToken();
+        showTokenModal();
         return;
     }
 
     if (restoreButtonRegistry.length === 0) {
-        alert('No deleted content found on this page.');
+        showNotificationBanner('No deleted content found on this page.', 3000);
         return;
     }
 
     logDebug(`=== RESTORE ALL - Processing ${restoreButtonRegistry.length} items ===`);
 
+    const totalItems = restoreButtonRegistry.length;
+    let successCount = 0;
+    let deletedCount = 0;
+    let failedCount = 0;
+    let skippedCount = 0;
+    let processedCount = 0;
+
+    // Show initial notification (no auto-hide)
+    showNotificationBanner(`Processing 0/${totalItems} items...`, 0);
+
     // Process each button sequentially to avoid overwhelming PushShift
     for (const entry of restoreButtonRegistry) {
         if (entry.button.disabled || entry.button.textContent === 'Failed') {
+            skippedCount++;
             continue; // Skip already processed or failed buttons
         }
 
+        processedCount++;
+
+        // Update progress notification
+        showNotificationBanner(`Restoring ${processedCount}/${totalItems}...`, 0, true);
+
         logDebug(`Restoring: ${entry.thingId}`);
-        await performRestoration(entry.authorElement, entry.button, entry.thingId, entry.cachedUsername);
+        const result = await performRestoration(entry.authorElement, entry.button, entry.thingId, entry.cachedUsername);
+
+        if (result === 'success') {
+            successCount++;
+        } else if (result === 'deleted') {
+            deletedCount++;
+        } else if (result === 'failed') {
+            failedCount++;
+        }
 
         // Small delay between requests to be respectful to API
         await new Promise(resolve => setTimeout(resolve, 500));
     }
 
+    const totalProcessed = successCount + deletedCount;
+
     logDebug('=== RESTORE ALL COMPLETE ===');
-    alert(`Restoration complete! Processed ${restoreButtonRegistry.length} items.`);
+    logDebug(`Success: ${successCount}, Deleted: ${deletedCount}, Failed: ${failedCount}, Skipped: ${skippedCount}`);
+
+    // Build final notification message
+    let message = ` Processed ${totalProcessed}/${totalItems} items successfully.`;
+    if (deletedCount > 0) {
+        message += ` ${deletedCount} item${deletedCount !== 1 ? 's were' : ' was'} confirmed deleted.`;
+    }
+    if (failedCount > 0) {
+        message += ` Unable to restore ${failedCount} item${failedCount !== 1 ? 's' : ''}.`;
+    }
+
+    // Show final completion notification (10 second auto-hide), updating the existing banner
+    showNotificationBanner(message, 10000, true);
 }
 
 // Perform the actual restoration (called by both direct click and resume flow)
+// Returns: 'success' if restored, 'deleted' if confirmed deleted, 'failed' if error
 async function performRestoration(authorElement, button, thingId, cachedUsername) {
     button.disabled = true;
     button.textContent = 'Restoring...';
@@ -9432,6 +9504,7 @@ async function performRestoration(authorElement, button, thingId, cachedUsername
         displayConfirmedDeleted(authorElement);
         cacheDeletedContent(thingId, username);
         button.remove();
+        return 'deleted';
     } else if (username) {
         // CRITICAL: Get thing container BEFORE replacing authorElement
         const thingContainer = authorElement.closest('div.thing');
@@ -9453,9 +9526,11 @@ async function performRestoration(authorElement, button, thingId, cachedUsername
         }
 
         button.remove();
+        return 'success';
     } else {
         button.textContent = 'Failed';
         button.disabled = false;
+        return 'failed';
     }
 }
 
