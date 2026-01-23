@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.83
+// @version      1.831
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -7907,7 +7907,7 @@ function copyDeepAnalysisSectionAsMarkdown(sectionType, analysis, username) {
                                     changeText = '—';
                                 }
 
-                                markdown += `| ${date} | ${point.age} | ${changeText} | r/${point.subreddit} |\n`;
+                                markdown += `| ${date} | ${point.age} | ${changeText} | /r/${point.subreddit} |\n`;
                             }
                         }
                     });
@@ -7933,7 +7933,7 @@ function copyDeepAnalysisSectionAsMarkdown(sectionType, analysis, username) {
                             changeText = '—';
                         }
 
-                        markdown += `| ${date} | ${point.age} | ${changeText} | r/${point.subreddit} |\n`;
+                        markdown += `| ${date} | ${point.age} | ${changeText} | /r/${point.subreddit} |\n`;
                         prevAge = point.age;
                     });
 
