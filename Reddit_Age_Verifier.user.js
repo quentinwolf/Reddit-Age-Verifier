@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.841
+// @version      1.842
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -99,6 +99,7 @@ const DEFAULT_SETTINGS = {
     defaultSort: 'newest', // 'oldest' or 'newest'
     autoFilterPosted: false, // auto-filter to show only posted ages
     showRestoreButtons: true,          // Enable/disable the restore feature
+    restoreAllWorkers: 3, // Number of concurrent workers for Restore All (1-5)
     autoRestoreDeletedAuthors: false,  // Future: auto-restore on page load if cached
     modalWidth: 800, // default results modal width in pixels
     modalHeight: 900, // default results modal height in pixels
@@ -2690,6 +2691,16 @@ function showSettingsModal() {
                     <input type="checkbox" class="age-settings-checkbox"  id="autoRestoreDeletedAuthors"
                            ${userSettings.autoRestoreDeletedAuthors ? 'checked' : ''} disabled title="Future feature">
                 </div>
+
+                <div class="age-settings-row">
+                    <label class="age-settings-label">Restore All: Concurrent Workers</label>
+                    <input type="number" class="age-settings-numberinput" id="setting-restore-workers"
+                           value="${userSettings.restoreAllWorkers}" min="1" max="5">
+                </div>
+
+                <span class="age-settings-help-text" style="display: block; margin-top: -8px; margin-bottom: 12px;">
+                    (1-5, higher = faster but more API load)
+                </span>
 
             </div>
 
@@ -9432,13 +9443,21 @@ async function restoreAll() {
     // Show initial notification (no auto-hide)
     showNotificationBanner(`Processing 0/${totalItems} items...`, 0);
 
-    // Process each button sequentially to avoid overwhelming PushShift
-    for (const entry of restoreButtonRegistry) {
+    // Filter out already processed items
+    const itemsToProcess = restoreButtonRegistry.filter(entry => {
         if (entry.button.disabled || entry.button.textContent === 'Failed') {
             skippedCount++;
-            continue; // Skip already processed or failed buttons
+            return false;
         }
+        return true;
+    });
 
+    // Validate and clamp worker count
+    const workerCount = Math.min(Math.max(1, userSettings.restoreAllWorkers || 2), 5);
+    logDebug(`Using ${workerCount} concurrent workers`);
+
+    // Process items with limited concurrency
+    const processItem = async (entry) => {
         processedCount++;
 
         // Update progress notification
@@ -9457,7 +9476,23 @@ async function restoreAll() {
 
         // Small delay between requests to be respectful to API
         await new Promise(resolve => setTimeout(resolve, 500));
+    };
+
+    // Create worker pools that process items concurrently
+    const workers = [];
+    for (let i = 0; i < workerCount; i++) {
+        const workerItems = itemsToProcess.filter((_, index) => index % workerCount === i);
+        workers.push(
+            (async () => {
+                for (const entry of workerItems) {
+                    await processItem(entry);
+                }
+            })()
+        );
     }
+
+    // Wait for all workers to complete
+    await Promise.all(workers);
 
     const totalProcessed = successCount + deletedCount;
 
@@ -9465,7 +9500,7 @@ async function restoreAll() {
     logDebug(`Success: ${successCount}, Deleted: ${deletedCount}, Failed: ${failedCount}, Skipped: ${skippedCount}`);
 
     // Build final notification message
-    let message = ` Processed ${totalProcessed}/${totalItems} items successfully.`;
+    let message = `✓ Processed ${totalProcessed}/${totalItems} items successfully.`;
     if (deletedCount > 0) {
         message += ` ${deletedCount} item${deletedCount !== 1 ? 's were' : ' was'} confirmed deleted.`;
     }
