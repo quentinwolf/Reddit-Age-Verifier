@@ -9108,8 +9108,8 @@ function initDeletedAuthorRestore() {
                 // Confirmed deleted in archive
                 displayConfirmedDeleted(deletedSpan);
             } else {
-                // Valid restored username
-                displayRestoredAuthor(deletedSpan, username, fullname);
+                // Valid restored username - skip button injection since Toolbox will add them
+                displayRestoredAuthor(deletedSpan, username, fullname, false);
             }
         } else {
             // Not cached: show manual restore button
@@ -9346,7 +9346,7 @@ function displayConfirmedDeleted(authorElement) {
 }
 
 // Display the restored username
-function displayRestoredAuthor(authorElement, username, fullname = null) {
+function displayRestoredAuthor(authorElement, username, fullname = null, injectButtons = true) {
     // CRITICAL: Replace the [deleted] span with a proper <a class="author"> element
     // This is what toolbox expects to find
     const restoredLink = document.createElement('a');
@@ -9368,79 +9368,123 @@ function displayRestoredAuthor(authorElement, username, fullname = null) {
     // Replace the [deleted] span with our new author link
     authorElement.parentNode.replaceChild(restoredLink, authorElement);
 
-    // CRITICAL: Add data-author AND data-author-fullname back to the parent div.thing
-    // Toolbox needs both to build thingDetails for usernotes
+    // CRITICAL: Add data-author, data-author-fullname, data-subreddit AND data-permalink back to the parent div.thing
+    // Toolbox needs all of these to build thingDetails for usernotes
     const thing = restoredLink.closest('div.thing');
     if (thing) {
         thing.setAttribute('data-author', username);
         if (fullname) {
             thing.setAttribute('data-author-fullname', fullname);
-            logDebug('Added data-author and data-author-fullname to div.thing:', username, fullname);
-        } else {
-            logDebug('Added data-author to div.thing (no fullname available):', username);
         }
+
+        // Get subreddit for the thing element
+        const subreddit = extractSubredditFromContext(restoredLink);
+        if (subreddit) {
+            thing.setAttribute('data-subreddit', subreddit);
+            thing.setAttribute('data-subreddit-prefixed', `r/${subreddit}`);
+            logDebug('Added data-subreddit to div.thing:', subreddit);
+        }
+
+        // CRITICAL: Toolbox needs data-permalink to build thingDetails
+        // Try to get existing permalink or construct it from the thing's fullname
+        if (!thing.dataset.permalink) {
+            const thingFullname = thing.dataset.fullname;
+            if (thingFullname) {
+                // Construct permalink based on thing type
+                if (thingFullname.startsWith('t1_')) {
+                    // Comment - try to get from parent post or data-context
+                    const contextAttr = thing.dataset.context;
+                    if (contextAttr) {
+                        thing.setAttribute('data-permalink', contextAttr);
+                        logDebug('Set data-permalink from data-context:', contextAttr);
+                    }
+                } else if (thingFullname.startsWith('t3_')) {
+                    // Submission - construct from URL or data-url
+                    const submissionId = thingFullname.substring(3);
+                    if (subreddit) {
+                        const permalink = `/r/${subreddit}/comments/${submissionId}/`;
+                        thing.setAttribute('data-permalink', permalink);
+                        logDebug('Set data-permalink for submission:', permalink);
+                    }
+                }
+            } else {
+                logDebug('WARNING: Could not set data-permalink - no data-fullname on thing');
+            }
+        }
+
+        logDebug('Thing attributes set:', {
+            author: username,
+            fullname: fullname || 'none',
+            subreddit: thing.dataset.subreddit || 'none',
+            permalink: thing.dataset.permalink || 'none',
+            thingFullname: thing.dataset.fullname || 'none'
+        });
     } else {
         logDebug('WARNING: Could not find parent div.thing to add data-author');
     }
 
-    // Create PushShift button
-    const pushShiftBtn = document.createElement('button');
-    pushShiftBtn.className = 'age-check-button';
-    pushShiftBtn.dataset.username = username;
-    pushShiftBtn.textContent = userSettings.defaultButtonText;
-    pushShiftBtn.style.cssText = `background-color: ${userSettings.buttonDefaultColor}; margin-left: 5px;`;
-    pushShiftBtn.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        handleAgeCheck(username);
-    };
+    // Only inject buttons if requested (manual restoration needs them immediately,
+    // but cached restoration on page load should skip them as Toolbox will add them)
+    if (injectButtons) {
+        // Create PushShift button
+        const pushShiftBtn = document.createElement('button');
+        pushShiftBtn.className = 'age-check-button';
+        pushShiftBtn.dataset.username = username;
+        pushShiftBtn.textContent = userSettings.defaultButtonText;
+        pushShiftBtn.style.cssText = `background-color: ${userSettings.buttonDefaultColor}; margin-left: 5px;`;
+        pushShiftBtn.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            handleAgeCheck(username);
+        };
 
-    // Right-click context menu
-    pushShiftBtn.oncontextmenu = (e) => {
-        e.preventDefault();
-        showContextMenu(e, username, pushShiftBtn);
-    };
+        // Right-click context menu
+        pushShiftBtn.oncontextmenu = (e) => {
+            e.preventDefault();
+            showContextMenu(e, username, pushShiftBtn);
+        };
 
-    // Insert button after restored link
-    restoredLink.parentNode.insertBefore(pushShiftBtn, restoredLink.nextSibling);
+        // Insert button after restored link
+        restoredLink.parentNode.insertBefore(pushShiftBtn, restoredLink.nextSibling);
 
-    // Extract subreddit and add toolbox buttons
-    const subreddit = extractSubredditFromContext(restoredLink);
-    if (subreddit) {
-        const thingId = extractThingId(restoredLink);
-        logDebug('Creating toolbox buttons - thingId:', thingId, 'subreddit:', subreddit);
+        // Extract subreddit and add toolbox buttons
+        const subreddit = extractSubredditFromContext(restoredLink);
+        if (subreddit) {
+            const thingId = extractThingId(restoredLink);
+            logDebug('Creating toolbox buttons - thingId:', thingId, 'subreddit:', subreddit);
 
-        // CRITICAL: Don't replace toolbox placeholder nodes - mutate them in place
-        const existingToolboxContainer = pushShiftBtn.parentNode.querySelector('.tb-jsapi-author-container');
+            // CRITICAL: Don't replace toolbox placeholder nodes - mutate them in place
+            const existingToolboxContainer = pushShiftBtn.parentNode.querySelector('.tb-jsapi-author-container');
 
-        if (existingToolboxContainer) {
-            logDebug('Found existing toolbox container, populating in place');
-            let toolboxSpan = existingToolboxContainer.querySelector('span[data-name="toolbox"]');
+            if (existingToolboxContainer) {
+                logDebug('Found existing toolbox container, populating in place');
+                let toolboxSpan = existingToolboxContainer.querySelector('span[data-name="toolbox"]');
 
-            if (!toolboxSpan) {
-                // Create it if it doesn't exist
-                toolboxSpan = document.createElement('span');
-                toolboxSpan.setAttribute('data-name', 'toolbox');
-                existingToolboxContainer.appendChild(toolboxSpan);
+                if (!toolboxSpan) {
+                    // Create it if it doesn't exist
+                    toolboxSpan = document.createElement('span');
+                    toolboxSpan.setAttribute('data-name', 'toolbox');
+                    existingToolboxContainer.appendChild(toolboxSpan);
+                }
+
+                // Mutate the existing span in place - don't replace it
+                toolboxSpan.className = 'tb-frontend-container ut-thing';
+                toolboxSpan.setAttribute('data-subreddit', subreddit);
+                toolboxSpan.setAttribute('data-author', username);
+                const tbType = thingId && thingId.startsWith('t3_') ? 'TBpostAuthor' : 'TBcommentAuthor';
+                toolboxSpan.setAttribute('data-tb-type', tbType);
+
+                // Clear existing content and append buttons
+                toolboxSpan.textContent = '';
+                const buttonsFragment = createToolboxButtonsFragment(username, subreddit, restoredLink, thingId);
+                toolboxSpan.appendChild(buttonsFragment);
+
+            } else {
+                // No existing container - create new one
+                logDebug('No existing toolbox container, creating new one');
+                const toolboxContainer = createToolboxButtons(username, subreddit, restoredLink, thingId);
+                pushShiftBtn.parentNode.insertBefore(toolboxContainer, pushShiftBtn.nextSibling);
             }
-
-            // Mutate the existing span in place - don't replace it
-            toolboxSpan.className = 'tb-frontend-container ut-thing';
-            toolboxSpan.setAttribute('data-subreddit', subreddit);
-            toolboxSpan.setAttribute('data-author', username);
-            const tbType = thingId && thingId.startsWith('t3_') ? 'TBpostAuthor' : 'TBcommentAuthor';
-            toolboxSpan.setAttribute('data-tb-type', tbType);
-
-            // Clear existing content and append buttons
-            toolboxSpan.textContent = '';
-            const buttonsFragment = createToolboxButtonsFragment(username, subreddit, restoredLink, thingId);
-            toolboxSpan.appendChild(buttonsFragment);
-
-        } else {
-            // No existing container - create new one
-            logDebug('No existing toolbox container, creating new one');
-            const toolboxContainer = createToolboxButtons(username, subreddit, restoredLink, thingId);
-            pushShiftBtn.parentNode.insertBefore(toolboxContainer, pushShiftBtn.nextSibling);
         }
     }
 }
@@ -9504,13 +9548,9 @@ function createToolboxButtonsFragment(username, subreddit, authorElement, thingI
     historyBtn.textContent = 'H';
 
     // Create N button (notes)
-    // CRITICAL: Make ID unique to avoid conflicts, or omit entirely
     const notesBtn = document.createElement('a');
     notesBtn.href = 'javascript:;';
-    // Use unique ID per thing to avoid conflicts
-    if (thingId) {
-        notesBtn.id = 'add-user-tag-' + thingId.replace('_', '-');
-    }
+    notesBtn.id = 'add-user-tag';  // CRITICAL: Toolbox expects this exact ID
     notesBtn.className = 'tb-bracket-button tb-usernote-button add-usernote-' + subreddit;
     notesBtn.setAttribute('data-author', username);
     notesBtn.setAttribute('data-subreddit', subreddit);
