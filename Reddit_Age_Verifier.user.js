@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.838
+// @version      1.839
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -2458,12 +2458,20 @@ function showSettingsModal() {
                 </div>
 
                 <div style="margin-bottom: 15px;">
-                    <div style="font-weight: bold; margin-bottom: 8px; color: var(--av-text);">Deleted Author Cache (Restored Users)</div>
+                    <div style="font-weight: bold; margin-bottom: 8px; color: var(--av-text);">Deleted Content Cache</div>
                     <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
                         <span class="analysis-stat-label">Restored Authors</span>
                         <span class="analysis-stat-value">${(() => {
                             const stats = getCacheStatistics();
                             return stats.deletedAuthorCount;
+                        })()}</span>
+                    </div>
+
+                    <div class="analysis-stat-row" style="border-bottom: none; padding: 4px 0;">
+                        <span class="analysis-stat-label">Restored Content</span>
+                        <span class="analysis-stat-value">${(() => {
+                            const stats = getCacheStatistics();
+                            return stats.deletedContentCount;
                         })()}</span>
                     </div>
 
@@ -5046,7 +5054,26 @@ function getCacheStatistics() {
 
     // Deleted author cache stats
     const deletedContentCache = getDeletedContentCache();
-    stats.deletedAuthorCount = Object.keys(deletedContentCache).length;
+    const cacheEntries = Object.values(deletedContentCache);
+
+    // Count unique authors (deduplicate by username)
+    const uniqueAuthors = new Set();
+    cacheEntries.forEach(entry => {
+        const username = typeof entry === 'string' ? entry : entry?.username;
+        if (username && username !== '[deleted]') {
+            uniqueAuthors.add(username);
+        }
+    });
+    stats.deletedAuthorCount = uniqueAuthors.size;
+
+    // Count restored content (body or selftext that's not deleted/removed)
+    stats.deletedContentCount = cacheEntries.filter(entry => {
+        if (typeof entry !== 'object') return false;
+        const hasBody = entry.body && entry.body !== '[deleted]' && entry.body !== '[removed]';
+        const hasSelftext = entry.selftext && entry.selftext !== '[deleted]' && entry.selftext !== '[removed]';
+        return hasBody || hasSelftext;
+    }).length;
+
     const deletedContentCacheString = JSON.stringify(deletedContentCache);
     stats.deletedContentCacheSize = deletedContentCacheString.length;
 
