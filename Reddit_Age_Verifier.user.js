@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.842
+// @version      1.843
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -9144,7 +9144,11 @@ function getCachedDeletedAuthor(thingId) {
 // Store all restore buttons for "Restore All" functionality
 const restoreButtonRegistry = [];
 
+// Track which thing IDs we've already attempted to restore (prevents infinite loops)
+const processedDeletedAuthors = new Set();
+
 function initDeletedAuthorRestore() {
+    logDebug('[DEBUG] initDeletedAuthorRestore() called at', new Date().toLocaleTimeString());
     if (!userSettings.showRestoreButtons) return;
 
     const cache = getDeletedContentCache();
@@ -9157,16 +9161,19 @@ function initDeletedAuthorRestore() {
     );
 
     deletedSpans.forEach(deletedSpan => {
-        // Skip if already processed
-        if (deletedSpan.dataset.restoreProcessed) return;
-        deletedSpan.dataset.restoreProcessed = 'true';
-
-        // Extract thing ID from parent context
+        // Extract thing ID from parent context FIRST (before other checks)
         const thingId = extractThingId(deletedSpan);
         if (!thingId) {
-            logDebug('Could not extract thing ID for deleted author');
-            return;
+            return; // Silently skip if we can't get thing ID
         }
+
+        // CRITICAL: Check global processed set to prevent infinite loops
+        if (processedDeletedAuthors.has(thingId)) {
+            return; // Already processed this thing ID, skip silently
+        }
+
+        // Mark as processed immediately to prevent reprocessing during DOM mutations
+        processedDeletedAuthors.add(thingId);
 
         // Check if content is also deleted (for logging purposes)
         const hasDeletedContent = checkForDeletedContent(deletedSpan, thingId);
@@ -11049,10 +11056,6 @@ GM_registerMenuCommand('📍 View Tracked Subreddits', () => {
     showTrackedSubredditsModal();
 });
 
-// Set up mutation observer
-const observer = new MutationObserver(debouncedMainLoop);
-observer.observe(document.body, { childList: true, subtree: true });
-
 // Initialize deleted author restoration on old/www reddit
 if (!isModReddit) {
     // Run on initial load
@@ -11062,19 +11065,28 @@ if (!isModReddit) {
     const originalDebouncedMainLoop = debouncedMainLoop;
     debouncedMainLoop = function() {
         originalDebouncedMainLoop();
-        setTimeout(initDeletedAuthorRestore, 100); // Small delay after main processing
+        setTimeout(() => {
+            initDeletedAuthorRestore();
+            processUserProfilePage();
+            // CRITICAL: Run processOldReddit again after restoration to add Search buttons to restored authors
+            processOldReddit();
+        }, 100);
+    };
+} else {
+    // For mod.reddit.com, still need profile page processing
+    const originalDebouncedMainLoop = debouncedMainLoop;
+    debouncedMainLoop = function() {
+        originalDebouncedMainLoop();
+        setTimeout(processUserProfilePage, 100);
     };
 }
 
-// Initialize user profile page buttons
+// Initialize user profile page buttons on load
 processUserProfilePage();
 
-// Run profile page processing on DOM changes (for navigation)
-const originalDebouncedMainLoop2 = debouncedMainLoop;
-debouncedMainLoop = function() {
-    originalDebouncedMainLoop2();
-    setTimeout(processUserProfilePage, 100);
-};
+// Set up mutation observer AFTER all debouncedMainLoop overrides
+const observer = new MutationObserver(debouncedMainLoop);
+observer.observe(document.body, { childList: true, subtree: true });
 
 // Escape key handler to close topmost modal and context menu
 document.addEventListener('keydown', function(e) {
