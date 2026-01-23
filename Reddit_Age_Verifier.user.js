@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.843
+// @version      1.844
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -9236,6 +9236,57 @@ function initDeletedAuthorRestore() {
             injectRestoreButton(deletedSpan, thingId, null);
         }
     });
+
+    // ALSO check for removed content where author still exists (only process unprocessed things)
+    document.querySelectorAll('div.thing:not([data-removed-checked])').forEach(thing => {
+        const thingId = thing.dataset.fullname || thing.id?.replace('thing_', '');
+        if (!thingId) {
+            // Mark as checked even if no thingId to avoid reprocessing
+            thing.setAttribute('data-removed-checked', 'true');
+            return;
+        }
+
+        // Mark as checked immediately to prevent reprocessing
+        thing.setAttribute('data-removed-checked', 'true');
+
+        // Check if author is NOT deleted
+        const authorLink = thing.querySelector('.tagline a.author');
+        if (!authorLink || authorLink.textContent === '[deleted]') return;
+
+        // Check if content IS removed - need to check multiple possible locations
+        let bodyMd = thing.querySelector('.entry .usertext-body > div.md');
+
+        // For comments, might also be nested differently
+        if (!bodyMd) {
+            bodyMd = thing.querySelector('.entry div.md');
+        }
+
+        if (!bodyMd) return;
+
+        const currentText = bodyMd.textContent.trim();
+        logDebug(`[Removed Check] Thing ${thingId}: "${currentText}"`);
+
+        if (currentText === '[removed]' || currentText === '[ Removed by Reddit ]') {
+            logDebug('Found removed content with active author:', thingId);
+
+            // Check cache
+            const cachedResult = cache[thingId];
+            if (cachedResult && typeof cachedResult === 'object' &&
+                (cachedResult.body || cachedResult.selftext)) {
+                // Auto-restore from cache
+                logDebug('Auto-restoring removed content from cache for', thingId);
+                displayRestoredContent(thing, thingId, cachedResult);
+            } else {
+                // Inject Restore button in the tagline after the PushShift button
+                const tagline = thing.querySelector('.tagline');
+                if (tagline && !tagline.querySelector('.restore-deleted-btn')) {
+                    logDebug('Injecting Restore button for removed content');
+                    injectRestoreButton(tagline, thingId, null);
+                }
+            }
+        }
+    });
+
 }
 
 // Check if the post/comment content is also deleted
@@ -11030,7 +11081,7 @@ const activeProcessor = isModReddit ? processModReddit : processOldReddit;
 let debounceTimer;
 function debouncedMainLoop() {
     clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(activeProcessor, 500);
+    debounceTimer = setTimeout(activeProcessor, 1500);
 }
 
 // Load settings first
@@ -11061,23 +11112,30 @@ if (!isModReddit) {
     // Run on initial load
     initDeletedAuthorRestore();
 
-    // Run on future DOM changes (append to debounced loop)
-    const originalDebouncedMainLoop = debouncedMainLoop;
-    debouncedMainLoop = function() {
-        originalDebouncedMainLoop();
-        setTimeout(() => {
+    // Debounce for deleted author restoration (separate from main loop)
+    let restoreDebounceTimer;
+    function debouncedRestore() {
+        clearTimeout(restoreDebounceTimer);
+        restoreDebounceTimer = setTimeout(() => {
             initDeletedAuthorRestore();
             processUserProfilePage();
             // CRITICAL: Run processOldReddit again after restoration to add Search buttons to restored authors
             processOldReddit();
-        }, 100);
+        }, 500);
+    }
+
+    // Run on future DOM changes (append to debounced loop)
+    const originalDebouncedMainLoop = debouncedMainLoop;
+    debouncedMainLoop = function() {
+        originalDebouncedMainLoop();
+        debouncedRestore();
     };
 } else {
     // For mod.reddit.com, still need profile page processing
     const originalDebouncedMainLoop = debouncedMainLoop;
     debouncedMainLoop = function() {
         originalDebouncedMainLoop();
-        setTimeout(processUserProfilePage, 100);
+        setTimeout(processUserProfilePage, 500);
     };
 }
 
