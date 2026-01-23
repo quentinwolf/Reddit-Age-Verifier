@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.831
+// @version      1.835
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -55,7 +55,7 @@ let BODY_SNIPPET_LENGTH = 300;    // Characters to show for post body before tru
 let CACHE_EXPIRATION = 7 * 24 * 60 * 60 * 1000;      // 1 week for user results
 const TOKEN_EXPIRATION = 24 * 60 * 60 * 1000;          // 24 hours for API token
 const BUTTON_CACHE_EXPIRATION = 365 * 24 * 60 * 60 * 1000; // 1 year for button text
-const DELETED_AUTHOR_CACHE_KEY = 'deletedAuthorCache';
+const DELETED_CONTENT_CACHE_KEY = 'deletedContentCache';
 
 // PushShift API configuration
 const PUSHSHIFT_API_BASE = "https://api.pushshift.io";
@@ -2471,7 +2471,7 @@ function showSettingsModal() {
                         <span class="analysis-stat-label">Cache Size</span>
                         <span class="analysis-stat-value">${(() => {
                             const stats = getCacheStatistics();
-                            return stats.deletedAuthorCacheSizeFormatted;
+                            return stats.deletedContentCacheSizeFormatted;
                         })()}</span>
                     </div>
                 </div>
@@ -2491,7 +2491,7 @@ function showSettingsModal() {
                 <div class="age-settings-buttons-row" style="margin-top: 15px;">
                     <button class="age-modal-button danger" id="clear-profile-cache-btn">Clear Profile Cache</button>
                     <button class="age-modal-button danger" id="clear-button-cache-btn">Clear Button Cache</button>
-                    <button class="age-modal-button danger" id="clear-deleted-authors-btn">Clear Deleted Authors</button>
+                    <button class="age-modal-button danger" id="clear-deleted-content-btn">Clear Cached Deleted Content</button>
                     <button class="age-modal-button danger" id="clear-token-btn">Clear API Token</button>
                 </div>
 
@@ -3151,11 +3151,11 @@ function showSettingsModal() {
         }
     };
 
-    const clearDeletedAuthorsBtn = modal.querySelector('#clear-deleted-authors-btn');
-    clearDeletedAuthorsBtn.onclick = () => {
-        if (confirm('Clear all restored deleted author usernames? This cannot be undone.')) {
-            clearDeletedAuthorCache();
-            showNotificationBanner('Deleted author cache cleared!', 2000);
+    const clearDeletedContentBtn = modal.querySelector('#clear-deleted-content-btn');
+    clearDeletedContentBtn.onclick = () => {
+        if (confirm('Clear all restored deleted author usernames and content? This cannot be undone.')) {
+            clearDeletedContentCache();
+            showNotificationBanner('Deleted content cache cleared!', 2000);
             closeModal();
         }
     };
@@ -3347,8 +3347,8 @@ function clearButtonCache() {
     Object.keys(buttonCache).forEach(key => delete buttonCache[key]);
 }
 
-function clearDeletedAuthorCache() {
-    GM_setValue(DELETED_AUTHOR_CACHE_KEY, '{}');
+function clearDeletedContentCache() {
+    GM_setValue(DELETED_CONTENT_CACHE_KEY, '{}');
     logDebug('Deleted author cache cleared');
 }
 
@@ -5045,17 +5045,17 @@ function getCacheStatistics() {
     }
 
     // Deleted author cache stats
-    const deletedAuthorCache = getDeletedAuthorCache();
-    stats.deletedAuthorCount = Object.keys(deletedAuthorCache).length;
-    const deletedAuthorCacheString = JSON.stringify(deletedAuthorCache);
-    stats.deletedAuthorCacheSize = deletedAuthorCacheString.length;
+    const deletedContentCache = getDeletedContentCache();
+    stats.deletedAuthorCount = Object.keys(deletedContentCache).length;
+    const deletedContentCacheString = JSON.stringify(deletedContentCache);
+    stats.deletedContentCacheSize = deletedContentCacheString.length;
 
-    if (stats.deletedAuthorCacheSize < 1024) {
-        stats.deletedAuthorCacheSizeFormatted = stats.deletedAuthorCacheSize + ' B';
-    } else if (stats.deletedAuthorCacheSize < 1024 * 1024) {
-        stats.deletedAuthorCacheSizeFormatted = (stats.deletedAuthorCacheSize / 1024).toFixed(2) + ' KB';
+    if (stats.deletedContentCacheSize < 1024) {
+        stats.deletedContentCacheSizeFormatted = stats.deletedContentCacheSize + ' B';
+    } else if (stats.deletedContentCacheSize < 1024 * 1024) {
+        stats.deletedContentCacheSizeFormatted = (stats.deletedContentCacheSize / 1024).toFixed(2) + ' KB';
     } else {
-        stats.deletedAuthorCacheSizeFormatted = (stats.deletedAuthorCacheSize / (1024 * 1024)).toFixed(2) + ' MB';
+        stats.deletedContentCacheSizeFormatted = (stats.deletedContentCacheSize / (1024 * 1024)).toFixed(2) + ' MB';
     }
 
     return stats;
@@ -9054,33 +9054,37 @@ function createTimelineEntry(point, idx, prevAge, trackedSubs) {
 // ============================================================================
 
 // Get deleted author cache
-function getDeletedAuthorCache() {
-    const cached = GM_getValue(DELETED_AUTHOR_CACHE_KEY, '{}');
+function getDeletedContentCache() {
+    const cached = GM_getValue(DELETED_CONTENT_CACHE_KEY, '{}');
     return JSON.parse(cached);
 }
 
-// Save deleted author to cache
-function cacheDeletedAuthor(thingId, username) {
-    const cache = getDeletedAuthorCache();
-    cache[thingId] = username;
-    GM_setValue(DELETED_AUTHOR_CACHE_KEY, JSON.stringify(cache));
+// Cache deleted author data (now includes full post content)
+function cacheDeletedContent(thingId, data) {
+    const cache = getDeletedContentCache();
+    cache[thingId] = data;
+    GM_setValue(DELETED_CONTENT_CACHE_KEY, JSON.stringify(cache));
 }
 
 // Get cached author for a thing ID
 function getCachedDeletedAuthor(thingId) {
-    const cache = getDeletedAuthorCache();
+    const cache = getDeletedContentCache();
     return cache[thingId] || null;
 }
+
+// Store all restore buttons for "Restore All" functionality
+const restoreButtonRegistry = [];
 
 function initDeletedAuthorRestore() {
     if (!userSettings.showRestoreButtons) return;
 
-    const cache = getDeletedAuthorCache();
+    const cache = getDeletedContentCache();
 
-    // Find all spans containing exactly "[deleted]" inside tagline paragraphs
-    const allSpans = document.querySelectorAll('p.tagline span');
-    const deletedSpans = Array.from(allSpans).filter(span =>
-        span.textContent.trim() === '[deleted]'
+    // Find all spans and em tags containing exactly "[deleted]" inside tagline paragraphs
+    // This catches both expanded comments (span) and collapsed comments (em)
+    const allElements = document.querySelectorAll('p.tagline span, p.tagline em, .entry .tagline span:first-of-type:not(.flair)');
+    const deletedSpans = Array.from(allElements).filter(elem =>
+        elem.textContent.trim() === '[deleted]' && !elem.classList.contains('edited-timestamp')
     );
 
     deletedSpans.forEach(deletedSpan => {
@@ -9093,6 +9097,12 @@ function initDeletedAuthorRestore() {
         if (!thingId) {
             logDebug('Could not extract thing ID for deleted author');
             return;
+        }
+
+        // Check if content is also deleted (for logging purposes)
+        const hasDeletedContent = checkForDeletedContent(deletedSpan, thingId);
+        if (hasDeletedContent) {
+            logDebug(`Thing ${thingId} has deleted content as well as deleted author`);
         }
 
         // Check cache first
@@ -9110,6 +9120,14 @@ function initDeletedAuthorRestore() {
             } else {
                 // Valid restored username - skip button injection since Toolbox will add them
                 displayRestoredAuthor(deletedSpan, username, fullname, false);
+
+                // Also restore content from cache if available
+                if (typeof cachedResult === 'object' && (cachedResult.body || cachedResult.selftext)) {
+                    const thingContainer = deletedSpan.closest('div.thing');
+                    if (thingContainer) {
+                        displayRestoredContent(thingContainer, thingId, cachedResult);
+                    }
+                }
             }
         } else {
             // Not cached: show manual restore button
@@ -9118,29 +9136,94 @@ function initDeletedAuthorRestore() {
     });
 }
 
+// Check if the post/comment content is also deleted
+function checkForDeletedContent(authorElement, thingId) {
+    // Find the parent thing container
+    const thing = authorElement.closest('div.thing');
+    if (!thing) return false;
+
+    // Check for deleted comment body
+    if (thingId.startsWith('t1_')) {
+        const commentBody = thing.querySelector('.entry .usertext-body > div.md > p');
+        if (commentBody) {
+            const bodyText = commentBody.textContent.trim();
+            return bodyText === '[deleted]' || bodyText === '[removed]' || bodyText === '[ Removed by Reddit ]';
+        }
+    }
+
+    // Check for deleted submission body
+    if (thingId.startsWith('t3_')) {
+        const submissionBody = thing.querySelector('.entry .usertext-body > div.md');
+        if (submissionBody) {
+            const bodyText = submissionBody.textContent.trim();
+            return bodyText === '[deleted]' || bodyText === '[removed]' || bodyText === '[ Removed by Reddit ]';
+        }
+    }
+
+    return false;
+}
+
 // Extract thing ID from various Reddit DOM structures
 function extractThingId(authorElement) {
-    // Try multiple strategies to find the thing ID
+    logDebug('=== EXTRACT THING ID ===');
+    logDebug('Author element:', authorElement);
 
-    // Strategy 1: Look for parent with data-fullname
-    let parent = authorElement.closest('[data-fullname]');
+    // PRIORITY: For comments, always try to find the direct parent thing first
+    // Strategy 1: Look for closest parent div with id="thing_t1_xxx" (comment)
+    let parent = authorElement.closest('div.thing[id^="thing_t1_"]');
+    if (parent && parent.id) {
+        const thingId = parent.id.replace('thing_', '');
+        logDebug('Strategy 1 (thing_t1_ id - COMMENT) found:', thingId);
+        logDebug('Parent element:', parent);
+        return thingId;
+    }
+
+    // Strategy 2: Look for parent with data-fullname starting with t1_ (comment)
+    parent = authorElement.closest('[data-fullname^="t1_"]');
     if (parent && parent.dataset.fullname) {
+        logDebug('Strategy 2 (data-fullname t1_ - COMMENT) found:', parent.dataset.fullname);
+        logDebug('Parent element:', parent);
         return parent.dataset.fullname;
     }
 
-    // Strategy 2: Parse from permalink
+    // Strategy 3: Look for ANY parent thing with id
+    parent = authorElement.closest('div.thing[id^="thing_"]');
+    if (parent && parent.id) {
+        const thingId = parent.id.replace('thing_', '');
+        logDebug('Strategy 3 (thing_ id - FALLBACK) found:', thingId);
+        logDebug('Parent element:', parent);
+        return thingId;
+    }
+
+    // Strategy 4: Look for parent with any data-fullname
+    parent = authorElement.closest('[data-fullname]');
+    if (parent && parent.dataset.fullname) {
+        logDebug('Strategy 4 (data-fullname - FALLBACK) found:', parent.dataset.fullname);
+        logDebug('Parent element:', parent);
+        return parent.dataset.fullname;
+    }
+
+    // Strategy 5: Parse from permalink (LAST RESORT - often gets submission ID)
     parent = authorElement.closest('[data-permalink]');
     if (parent && parent.dataset.permalink) {
-        const match = parent.dataset.permalink.match(/\/comments\/([^\/]+)/);
-        if (match) return 't3_' + match[1];
+        // Try to extract comment ID from permalink first
+        const commentMatch = parent.dataset.permalink.match(/\/comments\/[^\/]+\/[^\/]+\/([^\/]+)/);
+        if (commentMatch) {
+            const thingId = 't1_' + commentMatch[1];
+            logDebug('Strategy 5 (permalink - COMMENT) found:', thingId);
+            return thingId;
+        }
+
+        // Fall back to submission ID
+        const submissionMatch = parent.dataset.permalink.match(/\/comments\/([^\/]+)/);
+        if (submissionMatch) {
+            const thingId = 't3_' + submissionMatch[1];
+            logDebug('Strategy 5 (permalink - SUBMISSION) found:', thingId);
+            return thingId;
+        }
     }
 
-    // Strategy 3: Look for comment ID in parent div
-    parent = authorElement.closest('[id^="thing_"]');
-    if (parent && parent.id) {
-        return parent.id.replace('thing_', '');
-    }
-
+    logDebug('ERROR: No thing ID found!');
     return null;
 }
 
@@ -9149,7 +9232,7 @@ function injectRestoreButton(authorElement, thingId, cachedUsername) {
     const button = document.createElement('button');
     button.textContent = 'Restore';
     button.className = 'restore-deleted-btn';
-    button.dataset.thingId = thingId;  // Add this line
+    button.dataset.thingId = thingId;
     button.style.cssText = 'margin-left: 5px; font-size: 10px; padding: 1px 4px; cursor: pointer;';
 
     button.onclick = async () => {
@@ -9173,7 +9256,101 @@ function injectRestoreButton(authorElement, thingId, cachedUsername) {
         await performRestoration(authorElement, button, thingId, cachedUsername);
     };
 
+    // Add right-click context menu
+    button.oncontextmenu = (e) => {
+        e.preventDefault();
+        showRestoreContextMenu(e, button);
+    };
+
     authorElement.parentNode.insertBefore(button, authorElement.nextSibling);
+
+    // Register button for "Restore All" functionality
+    restoreButtonRegistry.push({
+        button: button,
+        thingId: thingId,
+        authorElement: authorElement,
+        cachedUsername: cachedUsername
+    });
+}
+
+// Show context menu for restore button
+function showRestoreContextMenu(event, button) {
+    // Remove any existing context menu
+    const existingMenu = document.getElementById('restore-context-menu');
+    if (existingMenu) {
+        existingMenu.remove();
+    }
+
+    const menu = document.createElement('div');
+    menu.id = 'restore-context-menu';
+    menu.style.cssText = `
+        position: fixed;
+        left: ${event.clientX}px;
+        top: ${event.clientY}px;
+        background: white;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        z-index: 10000;
+        padding: 5px 0;
+        min-width: 180px;
+    `;
+
+    const restoreAllOption = document.createElement('div');
+    restoreAllOption.textContent = 'Restore/Undelete All';
+    restoreAllOption.style.cssText = `
+        padding: 8px 15px;
+        cursor: pointer;
+        font-size: 12px;
+    `;
+    restoreAllOption.onmouseover = () => restoreAllOption.style.background = '#f0f0f0';
+    restoreAllOption.onmouseout = () => restoreAllOption.style.background = 'white';
+    restoreAllOption.onclick = () => {
+        menu.remove();
+        restoreAll();
+    };
+
+    menu.appendChild(restoreAllOption);
+    document.body.appendChild(menu);
+
+    // Close menu when clicking elsewhere
+    setTimeout(() => {
+        document.addEventListener('click', function closeMenu() {
+            menu.remove();
+            document.removeEventListener('click', closeMenu);
+        });
+    }, 0);
+}
+
+// Restore all deleted authors and content on the page
+async function restoreAll() {
+    if (!apiToken) {
+        alert('Please authenticate with PushShift first. Click any Restore button to begin authentication.');
+        return;
+    }
+
+    if (restoreButtonRegistry.length === 0) {
+        alert('No deleted content found on this page.');
+        return;
+    }
+
+    logDebug(`=== RESTORE ALL - Processing ${restoreButtonRegistry.length} items ===`);
+
+    // Process each button sequentially to avoid overwhelming PushShift
+    for (const entry of restoreButtonRegistry) {
+        if (entry.button.disabled || entry.button.textContent === 'Failed') {
+            continue; // Skip already processed or failed buttons
+        }
+
+        logDebug(`Restoring: ${entry.thingId}`);
+        await performRestoration(entry.authorElement, entry.button, entry.thingId, entry.cachedUsername);
+
+        // Small delay between requests to be respectful to API
+        await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    logDebug('=== RESTORE ALL COMPLETE ===');
+    alert(`Restoration complete! Processed ${restoreButtonRegistry.length} items.`);
 }
 
 // Perform the actual restoration (called by both direct click and resume flow)
@@ -9181,19 +9358,47 @@ async function performRestoration(authorElement, button, thingId, cachedUsername
     button.disabled = true;
     button.textContent = 'Restoring...';
 
+    logDebug('=== PERFORM RESTORATION ===');
+    logDebug('Thing ID:', thingId);
+    logDebug('Author element:', authorElement);
+
     // If cached, use that; otherwise query PushShift
     const result = cachedUsername || await fetchDeletedAuthor(thingId);
+
+    logDebug('Fetch result:', result);
+    logDebug('Result type:', typeof result);
+
     const username = typeof result === 'string' ? result : result?.username;
     const fullname = typeof result === 'object' ? result?.fullname : null;
+
+    logDebug('Extracted username:', username);
+    logDebug('Extracted fullname:', fullname);
 
     if (username === '[deleted]') {
         // PushShift archived it but author was already deleted
         displayConfirmedDeleted(authorElement);
-        cacheDeletedAuthor(thingId, username);
+        cacheDeletedContent(thingId, username);
         button.remove();
     } else if (username) {
+        // CRITICAL: Get thing container BEFORE replacing authorElement
+        const thingContainer = authorElement.closest('div.thing');
+
         displayRestoredAuthor(authorElement, username, fullname);
-        cacheDeletedAuthor(thingId, typeof result === 'string' ? result : result);
+        cacheDeletedContent(thingId, typeof result === 'string' ? result : result);
+
+        // Also restore content if available
+        if (result && typeof result === 'object') {
+            logDebug('Attempting to restore content...');
+            logDebug('Has body:', !!result.body);
+            logDebug('Has selftext:', !!result.selftext);
+            logDebug('Body content:', result.body);
+            logDebug('Selftext content:', result.selftext);
+            // Pass the thing container directly instead of authorElement
+            displayRestoredContent(thingContainer, thingId, result);
+        } else {
+            logDebug('No content to restore - result is not an object or is null');
+        }
+
         button.remove();
     } else {
         button.textContent = 'Failed';
@@ -9260,11 +9465,11 @@ async function resumeRestoration(thingId) {
 
     if (username === '[deleted]') {
         displayConfirmedDeleted(authorElement);
-        cacheDeletedAuthor(thingId, result);
+        cacheDeletedContent(thingId, result);
         button.remove();
     } else if (username) {
         displayRestoredAuthor(authorElement, username, fullname);
-        cacheDeletedAuthor(thingId, result);
+        cacheDeletedContent(thingId, result);
         button.remove();
     } else {
         button.textContent = 'Failed';
@@ -9284,7 +9489,9 @@ async function fetchDeletedAuthor(thingId) {
         const type = thingId.startsWith('t3_') ? 'submission' : 'comment';
         const id = thingId.substring(3); // Remove 't3_' or 't1_' prefix
 
-        const url = `https://api.pushshift.io/reddit/${type}/search?ids=${id}&fields=author,author_fullname`;
+        const fields = 'author,author_fullname,body,selftext,title,created_utc,permalink';
+        const url = `https://api.pushshift.io/reddit/${type}/search?ids=${id}&fields=${fields}`;
+
         logDebug(`Fetching deleted author for ${thingId}: ${url}`);
 
         const response = await fetch(url, {
@@ -9311,16 +9518,31 @@ async function fetchDeletedAuthor(thingId) {
         logDebug(`API response data:`, data);
 
         if (data.data && data.data.length > 0 && data.data[0].author) {
-            const author = data.data[0].author;
-            const authorFullname = data.data[0].author_fullname || null; // May not always be present
+            const post = data.data[0];
+            const author = post.author;
+            const authorFullname = post.author_fullname || null; // May not always be present
+
+            // Build full data object including content
+            const fullData = {
+                username: author,
+                fullname: authorFullname,
+                body: post.body || null,  // For comments
+                selftext: post.selftext || null,  // For submissions
+                title: post.title || null,  // For submissions
+                created_utc: post.created_utc || null,
+                permalink: post.permalink || null,
+                author: author  // Store original author for content display
+            };
 
             // Return [deleted] as-is - it means PushShift archived it but author was already deleted
             if (author === '[deleted]') {
                 logDebug(`Author was already deleted in PushShift archive, returning '[deleted]'`);
-                return { username: author, fullname: null };
+                fullData.username = author;
+                fullData.fullname = null;
+                return fullData;
             } else {
                 logDebug(`Successfully restored author: ${author}, fullname: ${authorFullname}`);
-                return { username: author, fullname: authorFullname };
+                return fullData;
             }
         }
 
@@ -9487,6 +9709,185 @@ function displayRestoredAuthor(authorElement, username, fullname = null, injectB
             }
         }
     }
+}
+
+// Display restored content (comment body or submission selftext)
+function displayRestoredContent(thingContainer, thingId, postData) {
+    logDebug('=== DISPLAY RESTORED CONTENT ===');
+    logDebug('Thing ID:', thingId);
+    logDebug('Thing container:', thingContainer);
+    logDebug('Post data:', postData);
+
+    if (!thingContainer) {
+        logDebug('Cannot restore content: thing container not found');
+        return;
+    }
+
+    const thing = thingContainer;
+
+    // Determine if this is a comment or submission
+    const isComment = thingId.startsWith('t1_');
+    const contentText = isComment ? postData.body : postData.selftext;
+
+    if (!contentText || contentText === '[deleted]' || contentText === '[removed]') {
+        logDebug('No content to restore or content was already deleted in archive');
+        return;
+    }
+
+    // Check if this is a collapsed comment
+    const isCollapsed = thing.classList.contains('collapsed');
+
+    // Find or create the body container
+    let bodyContainer;
+    let entry = thing.querySelector('.entry');
+
+    if (!entry) {
+        logDebug('Cannot restore content: entry container not found');
+        return;
+    }
+
+    if (isComment) {
+        // For collapsed comments, we need to expand them or inject differently
+        if (isCollapsed) {
+            // Expand the comment first
+            thing.classList.remove('collapsed');
+            thing.classList.add('noncollapsed');
+            logDebug('Expanded collapsed comment for content restoration');
+        }
+
+        // Try to find existing body container
+        bodyContainer = thing.querySelector('.entry .usertext-body > div.md');
+
+        // If still not found, look for the usertext container and inject there
+        if (!bodyContainer) {
+            const usertext = thing.querySelector('.entry form.usertext');
+            if (usertext) {
+                // Create the missing structure
+                const usertextBody = document.createElement('div');
+                usertextBody.className = 'usertext-body';
+                const md = document.createElement('div');
+                md.className = 'md';
+                usertextBody.appendChild(md);
+
+                // Insert before the usertext form or at the end of entry
+                entry.insertBefore(usertextBody, usertext);
+                bodyContainer = md;
+                logDebug('Created missing usertext-body structure for collapsed comment');
+            }
+        }
+    } else {
+        // For submissions
+        bodyContainer = thing.querySelector('.entry .usertext-body > div.md');
+    }
+
+    if (!bodyContainer) {
+        logDebug('Cannot restore content: body container not found even after expansion');
+        return;
+    }
+
+    // Check if content was already restored
+    if (bodyContainer.querySelector('.og.restored-content')) {
+        logDebug('Content already restored, skipping');
+        return;
+    }
+
+    // Create restored content element with yellow background
+    const restoredContent = document.createElement('div');
+    restoredContent.className = 'og restored-content';
+    restoredContent.style.cssText = `
+        background: rgb(255, 245, 157) !important;
+        color: black !important;
+        opacity: 0.96;
+        padding: 5px;
+        margin: 5px 0;
+        border-radius: 3px;
+        font-size: 14px;
+        line-height: 1.5;
+    `;
+
+    // Convert markdown to HTML (basic conversion)
+    const contentDiv = document.createElement('div');
+    contentDiv.innerHTML = convertMarkdownToHTML(contentText);
+    restoredContent.appendChild(contentDiv);
+
+    // Add horizontal rule
+    const hr = document.createElement('hr');
+    hr.style.cssText = 'border: none; border-bottom: 1px solid #666; background: transparent; margin: 10px 0;';
+    restoredContent.appendChild(hr);
+
+    // Add metadata footer
+    const metadataDiv = document.createElement('div');
+    metadataDiv.style.cssText = 'font-size: 12px;';
+
+    metadataDiv.appendChild(document.createTextNode('Posted by '));
+
+    const authorLink = document.createElement('a');
+    authorLink.href = `/user/${postData.author}`;
+    authorLink.textContent = postData.author;
+    authorLink.style.cssText = 'color: #3e88a0; text-decoration: underline;';
+    metadataDiv.appendChild(authorLink);
+
+    if (postData.created_utc) {
+        const timeAgo = getRelativeTimeString(postData.created_utc);
+        metadataDiv.appendChild(document.createTextNode(' · ' + timeAgo));
+    }
+
+    restoredContent.appendChild(metadataDiv);
+
+    // Clear the [deleted]/[removed] text first if it exists
+    const deletedMarkers = bodyContainer.querySelectorAll('p, em');
+    deletedMarkers.forEach(marker => {
+        const text = marker.textContent.trim();
+        if (text === '[deleted]' || text === '[removed]' || text === '[ Removed by Reddit ]') {
+            marker.style.display = 'none';
+        }
+    });
+
+    // Insert the restored content at the beginning
+    bodyContainer.insertBefore(restoredContent, bodyContainer.firstChild);
+
+    logDebug('Content restored successfully');
+}
+
+// Convert relative timestamp to human-readable string
+function getRelativeTimeString(timestamp) {
+    const now = Math.floor(Date.now() / 1000);
+    const diff = now - timestamp;
+
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)} minutes ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)} hours ago`;
+    if (diff < 2592000) return `${Math.floor(diff / 86400)} days ago`;
+    if (diff < 31536000) return `${Math.floor(diff / 2592000)} months ago`;
+    return `${Math.floor(diff / 31536000)} years ago`;
+}
+
+// Basic markdown to HTML converter
+function convertMarkdownToHTML(markdown) {
+    if (!markdown) return '';
+
+    let html = markdown;
+
+    // Escape HTML
+    html = html.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    // Convert markdown formatting
+    html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>'); // Bold + italic
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>'); // Bold
+    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>'); // Italic
+    html = html.replace(/~~(.+?)~~/g, '<del>$1</del>'); // Strikethrough
+    html = html.replace(/`(.+?)`/g, '<code>$1</code>'); // Inline code
+
+    // Links
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" style="color: #3e88a0; text-decoration: underline;">$1</a>');
+
+    // Blockquotes
+    html = html.replace(/^&gt;\s?(.+)$/gm, '<blockquote style="border-left: 4px solid #c5c1ad; padding: 0 8px; margin: 5px 0;">$1</blockquote>');
+
+    // Line breaks
+    html = html.replace(/\n/g, '<br>');
+
+    return html;
 }
 
 // Extract subreddit from page context for toolbox buttons
