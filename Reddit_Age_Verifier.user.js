@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.837
+// @version      1.838
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -9748,16 +9748,16 @@ function displayRestoredContent(thingContainer, thingId, postData) {
         logDebug('Cannot restore content: thing container not found');
         return;
     }
-    
+
     const thing = thingContainer;
-    
+
     // Check if content is actually deleted before restoring
     let entry = thing.querySelector('.entry');
     if (!entry) {
         logDebug('Cannot restore content: entry container not found');
         return;
     }
-    
+
     // Check if the content body shows [deleted] or [removed]
     const bodyMd = thing.querySelector('.entry .usertext-body > div.md');
     if (bodyMd) {
@@ -9767,7 +9767,7 @@ function displayRestoredContent(thingContainer, thingId, postData) {
             return;
         }
     }
-    
+
     // Determine if this is a comment or submission
     const isComment = thingId.startsWith('t1_');
     const contentText = isComment ? postData.body : postData.selftext;
@@ -9782,7 +9782,6 @@ function displayRestoredContent(thingContainer, thingId, postData) {
 
     // Find or create the body container
     let bodyContainer;
-    let entry = thing.querySelector('.entry');
 
     if (!entry) {
         logDebug('Cannot restore content: entry container not found');
