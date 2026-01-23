@@ -10229,8 +10229,9 @@ function processUserProfilePage() {
         tbInner.setAttribute('data-subreddit', urlSubreddit); // Set fallback subreddit
 
         // Try to find a real thing ID from the first post/comment visible on the page
-        const firstThing = document.querySelector('[data-fullname^="t3_"], [data-fullname^="t1_"]');
-        const thingId = firstThing?.dataset?.fullname;
+        //const firstThing = document.querySelector('[data-fullname^="t3_"], [data-fullname^="t1_"]');
+        //const thingId = firstThing?.dataset?.fullname;
+        let thingId = "t1_hj2mt15"
 
         // Create M button (mod actions) - only if we have a valid thing ID
         let modBtn = null;
