@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.82
+// @version      1.83
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -9096,16 +9096,20 @@ function initDeletedAuthorRestore() {
         }
 
         // Check cache first
-        const cachedUsername = cache[thingId];
+        const cachedResult = cache[thingId];
 
-        if (cachedUsername) {
+        if (cachedResult) {
+            // Handle both old string format and new object format
+            const username = typeof cachedResult === 'string' ? cachedResult : cachedResult?.username;
+            const fullname = typeof cachedResult === 'object' ? cachedResult?.fullname : null;
+
             // Always auto-restore from cache (no API call needed)
-            if (cachedUsername === '[deleted]') {
+            if (username === '[deleted]') {
                 // Confirmed deleted in archive
                 displayConfirmedDeleted(deletedSpan);
             } else {
                 // Valid restored username
-                displayRestoredAuthor(deletedSpan, cachedUsername);
+                displayRestoredAuthor(deletedSpan, username, fullname);
             }
         } else {
             // Not cached: show manual restore button
@@ -9178,7 +9182,9 @@ async function performRestoration(authorElement, button, thingId, cachedUsername
     button.textContent = 'Restoring...';
 
     // If cached, use that; otherwise query PushShift
-    const username = cachedUsername || await fetchDeletedAuthor(thingId);
+    const result = cachedUsername || await fetchDeletedAuthor(thingId);
+    const username = typeof result === 'string' ? result : result?.username;
+    const fullname = typeof result === 'object' ? result?.fullname : null;
 
     if (username === '[deleted]') {
         // PushShift archived it but author was already deleted
@@ -9186,8 +9192,8 @@ async function performRestoration(authorElement, button, thingId, cachedUsername
         cacheDeletedAuthor(thingId, username);
         button.remove();
     } else if (username) {
-        displayRestoredAuthor(authorElement, username);
-        cacheDeletedAuthor(thingId, username);
+        displayRestoredAuthor(authorElement, username, fullname);
+        cacheDeletedAuthor(thingId, typeof result === 'string' ? result : result);
         button.remove();
     } else {
         button.textContent = 'Failed';
@@ -9243,18 +9249,22 @@ async function resumeRestoration(thingId) {
     button.textContent = 'Restoring...';
 
     // If cached, use that; otherwise query PushShift
-    const cachedUsername = getCachedDeletedAuthor(thingId);
-    const username = cachedUsername || await fetchDeletedAuthor(thingId);
+    const cachedResult = getCachedDeletedAuthor(thingId);
+    const result = cachedResult || await fetchDeletedAuthor(thingId);
 
-    logDebug('Username returned:', username);
+    // Handle both old string format and new object format
+    const username = typeof result === 'string' ? result : result?.username;
+    const fullname = typeof result === 'object' ? result?.fullname : null;
+
+    logDebug('Username returned:', username, 'Fullname:', fullname);
 
     if (username === '[deleted]') {
         displayConfirmedDeleted(authorElement);
-        cacheDeletedAuthor(thingId, username);
+        cacheDeletedAuthor(thingId, result);
         button.remove();
     } else if (username) {
-        displayRestoredAuthor(authorElement, username);
-        cacheDeletedAuthor(thingId, username);
+        displayRestoredAuthor(authorElement, username, fullname);
+        cacheDeletedAuthor(thingId, result);
         button.remove();
     } else {
         button.textContent = 'Failed';
@@ -9274,7 +9284,7 @@ async function fetchDeletedAuthor(thingId) {
         const type = thingId.startsWith('t3_') ? 'submission' : 'comment';
         const id = thingId.substring(3); // Remove 't3_' or 't1_' prefix
 
-        const url = `https://api.pushshift.io/reddit/${type}/search?ids=${id}&fields=author`;
+        const url = `https://api.pushshift.io/reddit/${type}/search?ids=${id}&fields=author,author_fullname`;
         logDebug(`Fetching deleted author for ${thingId}: ${url}`);
 
         const response = await fetch(url, {
@@ -9302,13 +9312,16 @@ async function fetchDeletedAuthor(thingId) {
 
         if (data.data && data.data.length > 0 && data.data[0].author) {
             const author = data.data[0].author;
+            const authorFullname = data.data[0].author_fullname || null; // May not always be present
+
             // Return [deleted] as-is - it means PushShift archived it but author was already deleted
             if (author === '[deleted]') {
                 logDebug(`Author was already deleted in PushShift archive, returning '[deleted]'`);
+                return { username: author, fullname: null };
             } else {
-                logDebug(`Successfully restored author: ${author}`);
+                logDebug(`Successfully restored author: ${author}, fullname: ${authorFullname}`);
+                return { username: author, fullname: authorFullname };
             }
-            return author;
         }
 
         logDebug(`No author found in response (empty data array or missing author field)`);
@@ -9333,14 +9346,42 @@ function displayConfirmedDeleted(authorElement) {
 }
 
 // Display the restored username
-function displayRestoredAuthor(authorElement, username) {
-    const restoredSpan = document.createElement('a');
-    restoredSpan.className = 'restored-author';
-    restoredSpan.textContent = `✓ ${username}`;
-    restoredSpan.href = `https://old.reddit.com/user/${username}`;
-    restoredSpan.target = '_blank';
-    restoredSpan.style.cssText = 'color: darkgreen; font-weight: normal; cursor: pointer;';
-    restoredSpan.title = 'Restored from archive (post or profile deleted)';
+function displayRestoredAuthor(authorElement, username, fullname = null) {
+    // CRITICAL: Replace the [deleted] span with a proper <a class="author"> element
+    // This is what toolbox expects to find
+    const restoredLink = document.createElement('a');
+    let className = 'author may-blank restored-author';
+    if (fullname) {
+        // Extract just the ID part from fullname (e.g., "t2_abc123" -> "abc123")
+        const userId = fullname.startsWith('t2_') ? fullname.substring(3) : fullname;
+        className += ` id-t2_${userId}`;
+        logDebug('Added user fullname class:', fullname);
+    }
+    restoredLink.className = className;
+    // Note: We can't get the user's t2_ fullname for deleted accounts, so we can't add id-t2_xxx class
+    restoredLink.textContent = username;
+    restoredLink.href = `https://old.reddit.com/user/${username}`;
+    restoredLink.target = '_blank';
+    restoredLink.style.cssText = 'color: darkgreen; font-weight: bold;';
+    restoredLink.title = 'Restored from archive (post or profile deleted)';
+
+    // Replace the [deleted] span with our new author link
+    authorElement.parentNode.replaceChild(restoredLink, authorElement);
+
+    // CRITICAL: Add data-author AND data-author-fullname back to the parent div.thing
+    // Toolbox needs both to build thingDetails for usernotes
+    const thing = restoredLink.closest('div.thing');
+    if (thing) {
+        thing.setAttribute('data-author', username);
+        if (fullname) {
+            thing.setAttribute('data-author-fullname', fullname);
+            logDebug('Added data-author and data-author-fullname to div.thing:', username, fullname);
+        } else {
+            logDebug('Added data-author to div.thing (no fullname available):', username);
+        }
+    } else {
+        logDebug('WARNING: Could not find parent div.thing to add data-author');
+    }
 
     // Create PushShift button
     const pushShiftBtn = document.createElement('button');
@@ -9354,40 +9395,51 @@ function displayRestoredAuthor(authorElement, username) {
         handleAgeCheck(username);
     };
 
-    // Right-click context menu (same as regular buttons)
+    // Right-click context menu
     pushShiftBtn.oncontextmenu = (e) => {
         e.preventDefault();
         showContextMenu(e, username, pushShiftBtn);
     };
 
-    // Replace the [deleted] element and add button
-    authorElement.parentNode.replaceChild(restoredSpan, authorElement);
-    restoredSpan.parentNode.insertBefore(pushShiftBtn, restoredSpan.nextSibling);
+    // Insert button after restored link
+    restoredLink.parentNode.insertBefore(pushShiftBtn, restoredLink.nextSibling);
 
-    // Extract subreddit and add toolbox buttons (use restoredSpan for context)
-    const subreddit = extractSubredditFromContext(restoredSpan);
+    // Extract subreddit and add toolbox buttons
+    const subreddit = extractSubredditFromContext(restoredLink);
     if (subreddit) {
-        const thingId = extractThingId(restoredSpan);
+        const thingId = extractThingId(restoredLink);
         logDebug('Creating toolbox buttons - thingId:', thingId, 'subreddit:', subreddit);
 
-        // Check if toolbox already created a placeholder
+        // CRITICAL: Don't replace toolbox placeholder nodes - mutate them in place
         const existingToolboxContainer = pushShiftBtn.parentNode.querySelector('.tb-jsapi-author-container');
-        const existingEmptySpan = existingToolboxContainer?.querySelector('span[data-name="toolbox"]');
 
-        if (existingEmptySpan && existingToolboxContainer) {
-            // Populate the existing empty span instead of creating new container
-            logDebug('Found existing toolbox placeholder, populating it');
-            const populatedSpan = createToolboxButtonsInner(username, subreddit, restoredSpan, thingId);
-            existingEmptySpan.parentNode.replaceChild(populatedSpan, existingEmptySpan);
-        } else if (existingToolboxContainer) {
-            // Container exists but no empty span - replace entire container
-            logDebug('Found existing toolbox container without placeholder, replacing it');
-            const toolboxContainer = createToolboxButtons(username, subreddit, restoredSpan, thingId);
-            existingToolboxContainer.parentNode.replaceChild(toolboxContainer, existingToolboxContainer);
+        if (existingToolboxContainer) {
+            logDebug('Found existing toolbox container, populating in place');
+            let toolboxSpan = existingToolboxContainer.querySelector('span[data-name="toolbox"]');
+
+            if (!toolboxSpan) {
+                // Create it if it doesn't exist
+                toolboxSpan = document.createElement('span');
+                toolboxSpan.setAttribute('data-name', 'toolbox');
+                existingToolboxContainer.appendChild(toolboxSpan);
+            }
+
+            // Mutate the existing span in place - don't replace it
+            toolboxSpan.className = 'tb-frontend-container ut-thing';
+            toolboxSpan.setAttribute('data-subreddit', subreddit);
+            toolboxSpan.setAttribute('data-author', username);
+            const tbType = thingId && thingId.startsWith('t3_') ? 'TBpostAuthor' : 'TBcommentAuthor';
+            toolboxSpan.setAttribute('data-tb-type', tbType);
+
+            // Clear existing content and append buttons
+            toolboxSpan.textContent = '';
+            const buttonsFragment = createToolboxButtonsFragment(username, subreddit, restoredLink, thingId);
+            toolboxSpan.appendChild(buttonsFragment);
+
         } else {
-            // No existing container, insert new one
+            // No existing container - create new one
             logDebug('No existing toolbox container, creating new one');
-            const toolboxContainer = createToolboxButtons(username, subreddit, restoredSpan, thingId);
+            const toolboxContainer = createToolboxButtons(username, subreddit, restoredLink, thingId);
             pushShiftBtn.parentNode.insertBefore(toolboxContainer, pushShiftBtn.nextSibling);
         }
     }
@@ -9424,6 +9476,64 @@ function extractSubredditFromContext(authorElement) {
 
     logDebug('Could not extract subreddit for toolbox buttons');
     return null;
+}
+
+// Create buttons as a document fragment (for appending to existing nodes)
+function createToolboxButtonsFragment(username, subreddit, authorElement, thingId) {
+    const fragment = document.createDocumentFragment();
+
+    // Create M button (mod actions)
+    const modBtn = document.createElement('a');
+    modBtn.href = 'javascript:;';
+    modBtn.title = 'Perform various mod actions on this user';
+    modBtn.className = 'global-mod-button tb-bracket-button';
+    modBtn.setAttribute('data-subreddit', subreddit);
+    modBtn.setAttribute('data-author', username);
+    if (thingId) {
+        modBtn.setAttribute('data-parentid', thingId);
+    }
+    modBtn.textContent = 'M';
+
+    // Create H button (history)
+    const historyBtn = document.createElement('a');
+    historyBtn.href = 'javascript:;';
+    historyBtn.className = 'user-history-button tb-bracket-button';
+    historyBtn.setAttribute('data-author', username);
+    historyBtn.setAttribute('data-subreddit', subreddit);
+    historyBtn.title = 'view & analyze user\'s submission and comment history';
+    historyBtn.textContent = 'H';
+
+    // Create N button (notes)
+    // CRITICAL: Make ID unique to avoid conflicts, or omit entirely
+    const notesBtn = document.createElement('a');
+    notesBtn.href = 'javascript:;';
+    // Use unique ID per thing to avoid conflicts
+    if (thingId) {
+        notesBtn.id = 'add-user-tag-' + thingId.replace('_', '-');
+    }
+    notesBtn.className = 'tb-bracket-button tb-usernote-button add-usernote-' + subreddit;
+    notesBtn.setAttribute('data-author', username);
+    notesBtn.setAttribute('data-subreddit', subreddit);
+    notesBtn.setAttribute('data-default-text', 'N');
+    notesBtn.textContent = 'N';
+
+    // Create P button (profile)
+    const profileBtn = document.createElement('a');
+    profileBtn.href = 'javascript:;';
+    profileBtn.className = 'tb-user-profile tb-bracket-button';
+    profileBtn.setAttribute('data-listing', 'overview');
+    profileBtn.setAttribute('data-user', username);
+    profileBtn.setAttribute('data-subreddit', subreddit);
+    profileBtn.title = 'view & filter user\'s profile in toolbox overlay';
+    profileBtn.textContent = 'P';
+
+    // Append all buttons to fragment
+    fragment.appendChild(modBtn);
+    fragment.appendChild(historyBtn);
+    fragment.appendChild(notesBtn);
+    fragment.appendChild(profileBtn);
+
+    return fragment;
 }
 
 // Create just the inner toolbox span with buttons (for populating existing containers)
