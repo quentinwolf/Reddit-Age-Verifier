@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.80
+// @version      1.81
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -1024,7 +1024,7 @@ GM_addStyle(`
     .timeline-date {
         color: var(--av-text-muted);
         font-size: 11px;
-        min-width: 160px;
+        min-width: 180px;
     }
 
     .timeline-age {
@@ -7882,7 +7882,7 @@ function copyDeepAnalysisSectionAsMarkdown(sectionType, analysis, username) {
                     entriesData.forEach((entry, idx) => {
                         if (entry.isCompressed) {
                             const compressedText = entry.trackedInCompressed > 0
-                                ? `[Compressed: ${entry.compressedCount} posts, ${entry.trackedInCompressed} in tracked subs]`
+                                ? `[Compressed: ${entry.compressedCount + entry.trackedInCompressed} posts]`
                                 : `[Compressed: ${entry.compressedCount} posts]`;
                             markdown += `| ${entry.startDate} - ${entry.endDate} | ${entry.age} | — | ${compressedText} |\n`;
                         } else {
