@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.81
+// @version      1.82
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -10114,6 +10114,174 @@ function processModReddit() {
     });
 }
 
+function processUserProfilePage() {
+    logDebug('=== processUserProfilePage CALLED ===');
+    logDebug('Current pathname:', window.location.pathname);
+
+    // Only run on /user/* pages (matches /user/username, /user/username/submitted, etc.)
+    const pathMatch = window.location.pathname.match(/^\/user\/[^\/]+/);
+    logDebug('Path match result:', pathMatch);
+
+    if (!pathMatch) {
+        logDebug('Not a user profile page, skipping');
+        return;
+    }
+
+    // Find the titlebox
+    const titlebox = document.querySelector('.titlebox');
+    logDebug('Titlebox found:', titlebox);
+
+    if (!titlebox) {
+        logDebug('No titlebox found, exiting');
+        return;
+    }
+
+    // Find the username h1 element
+    const usernameH1 = titlebox.querySelector('h1');
+    logDebug('Username H1 found:', usernameH1);
+    logDebug('H1 text content:', usernameH1?.textContent);
+
+    if (!usernameH1) {
+        logDebug('No h1 found in titlebox, exiting');
+        return;
+    }
+
+    // Check if we've already injected buttons
+    const existingContainer = titlebox.querySelector('.age-profile-buttons-container');
+    logDebug('Existing container found:', existingContainer);
+
+    if (existingContainer) {
+        logDebug('Buttons already injected, exiting');
+        return;
+    }
+
+    // Extract username from h1 or URL
+    const username = usernameH1.textContent.trim() ||
+                     window.location.pathname.match(/\/user\/([^\/]+)/)?.[1];
+
+    logDebug('Extracted username:', username);
+
+    if (!username) {
+        logDebug('No username found, exiting');
+        return;
+    }
+
+    // Check if user is ignored
+    const ignoredUsers = getIgnoredUsersList();
+    if (ignoredUsers.has(username.toLowerCase())) {
+        logDebug('User is ignored, exiting');
+        return;
+    }
+
+    logDebug('Creating button container...');
+
+    // Create container for our buttons
+    const buttonContainer = document.createElement('div');
+    buttonContainer.className = 'age-profile-buttons-container';
+    buttonContainer.style.cssText = 'margin: 8px 0; display: flex; align-items: center; gap: 5px;';
+
+    // Create PushShift button
+    const pushShiftBtn = document.createElement('button');
+    pushShiftBtn.className = 'age-check-button';
+    pushShiftBtn.dataset.username = username;
+    pushShiftBtn.style.cssText = `background-color: ${userSettings.buttonDefaultColor};`;
+
+    // Check button cache
+    const buttonText = getButtonCacheText(username);
+    if (buttonText) {
+        pushShiftBtn.textContent = buttonText;
+        pushShiftBtn.classList.add('cached');
+    } else {
+        pushShiftBtn.textContent = userSettings.defaultButtonText;
+    }
+
+    pushShiftBtn.onclick = () => handleAgeCheck(username);
+    pushShiftBtn.oncontextmenu = (e) => {
+        e.preventDefault();
+        showContextMenu(e, username, pushShiftBtn);
+    };
+
+    buttonContainer.appendChild(pushShiftBtn);
+    logDebug('PushShift button created');
+
+    // Extract subreddit from URL if we're viewing their posts in a specific subreddit
+    const subreddit = extractSubredditFromContext(titlebox);
+    logDebug('Extracted subreddit:', subreddit);
+
+    // Create toolbox buttons (use extracted subreddit or null)
+    if (subreddit) {
+        const toolboxContainer = createToolboxButtons(username, subreddit, usernameH1, null);
+        buttonContainer.appendChild(toolboxContainer);
+        logDebug('Toolbox buttons created with subreddit context');
+    } else {
+        // Create minimal toolbox buttons without subreddit context
+        // Use a default subreddit from URL if available (e.g., viewing profile filtered by subreddit)
+        const urlSubreddit = window.location.search.match(/[?&]subreddit=([^&]+)/)?.[1] || 'unknown';
+
+        const toolboxContainer = document.createElement('span');
+        toolboxContainer.className = 'tb-jsapi-author-container';
+
+        const tbInner = document.createElement('span');
+        tbInner.setAttribute('data-name', 'toolbox');
+        tbInner.setAttribute('data-tb-type', 'TBpostAuthor'); // Default to post type for profile pages
+        tbInner.className = 'tb-frontend-container ut-thing';
+        tbInner.setAttribute('data-author', username);
+        tbInner.setAttribute('data-subreddit', urlSubreddit); // Set fallback subreddit
+
+        // Try to find a real thing ID from the first post/comment visible on the page
+        const firstThing = document.querySelector('[data-fullname^="t3_"], [data-fullname^="t1_"]');
+        const thingId = firstThing?.dataset?.fullname;
+
+        // Create M button (mod actions) - only if we have a valid thing ID
+        let modBtn = null;
+        if (thingId) {
+            modBtn = document.createElement('a');
+            modBtn.href = 'javascript:;';
+            modBtn.title = 'Perform various mod actions on this user';
+            modBtn.className = 'global-mod-button tb-bracket-button';
+            modBtn.setAttribute('data-author', username);
+            modBtn.setAttribute('data-subreddit', urlSubreddit);
+            modBtn.setAttribute('data-parentid', thingId);
+            modBtn.textContent = 'M';
+            logDebug('M button created with real thing ID:', thingId);
+        } else {
+            logDebug('No thing ID found on page, skipping M button');
+        }
+
+        // Create H button (history)
+        const historyBtn = document.createElement('a');
+        historyBtn.href = 'javascript:;';
+        historyBtn.className = 'user-history-button tb-bracket-button';
+        historyBtn.setAttribute('data-author', username);
+        historyBtn.setAttribute('data-subreddit', urlSubreddit);
+        historyBtn.title = 'view & analyze user\'s submission and comment history';
+        historyBtn.textContent = 'H';
+
+        // Create P button (profile)
+        const profileBtn = document.createElement('a');
+        profileBtn.href = 'javascript:;';
+        profileBtn.className = 'tb-user-profile tb-bracket-button';
+        profileBtn.setAttribute('data-listing', 'overview');
+        profileBtn.setAttribute('data-user', username);
+        profileBtn.setAttribute('data-subreddit', urlSubreddit);
+        profileBtn.title = 'view & filter user\'s profile in toolbox overlay';
+        profileBtn.textContent = 'P';
+
+        if (modBtn) tbInner.appendChild(modBtn);
+        tbInner.appendChild(historyBtn);
+        tbInner.appendChild(profileBtn);
+
+        toolboxContainer.appendChild(tbInner);
+        buttonContainer.appendChild(toolboxContainer);
+        logDebug('Toolbox buttons created without subreddit context');
+    }
+
+    // Insert button container after the h1 but before the +friends button
+    usernameH1.parentNode.insertBefore(buttonContainer, usernameH1.nextSibling);
+    logDebug('Button container inserted into DOM');
+    logDebug('=== processUserProfilePage COMPLETE ===');
+}
+
 // ============================================================================
 // INITIALIZATION
 // ============================================================================
@@ -10166,6 +10334,16 @@ if (!isModReddit) {
         setTimeout(initDeletedAuthorRestore, 100); // Small delay after main processing
     };
 }
+
+// Initialize user profile page buttons
+processUserProfilePage();
+
+// Run profile page processing on DOM changes (for navigation)
+const originalDebouncedMainLoop2 = debouncedMainLoop;
+debouncedMainLoop = function() {
+    originalDebouncedMainLoop2();
+    setTimeout(processUserProfilePage, 100);
+};
 
 // Escape key handler to close topmost modal and context menu
 document.addEventListener('keydown', function(e) {
