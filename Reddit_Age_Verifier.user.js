@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.835
+// @version      1.836
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -9109,6 +9109,16 @@ function initDeletedAuthorRestore() {
         const cachedResult = cache[thingId];
 
         if (cachedResult) {
+            logDebug(`Cached result for ${thingId}:`, cachedResult);
+            logDebug(`Cached result type: ${typeof cachedResult}`);
+            if (typeof cachedResult === 'object') {
+                logDebug(`Has body: ${!!cachedResult.body}, Body value: ${cachedResult.body}`);
+                logDebug(`Has selftext: ${!!cachedResult.selftext}, Selftext value: ${cachedResult.selftext}`);
+            }
+
+            // CRITICAL: Get thing container BEFORE replacing deletedSpan
+            const thingContainer = deletedSpan.closest('div.thing');
+
             // Handle both old string format and new object format
             const username = typeof cachedResult === 'string' ? cachedResult : cachedResult?.username;
             const fullname = typeof cachedResult === 'object' ? cachedResult?.fullname : null;
@@ -9122,11 +9132,27 @@ function initDeletedAuthorRestore() {
                 displayRestoredAuthor(deletedSpan, username, fullname, false);
 
                 // Also restore content from cache if available
-                if (typeof cachedResult === 'object' && (cachedResult.body || cachedResult.selftext)) {
-                    const thingContainer = deletedSpan.closest('div.thing');
-                    if (thingContainer) {
+                if (typeof cachedResult === 'object' && thingContainer) {
+                    logDebug('Checking if cached content is restorable...');
+
+                    const hasRestorableBody = cachedResult.body &&
+                        cachedResult.body !== '[deleted]' &&
+                        cachedResult.body !== '[removed]';
+                    const hasRestorableSelftext = cachedResult.selftext &&
+                        cachedResult.selftext !== '[deleted]' &&
+                        cachedResult.selftext !== '[removed]';
+
+                    logDebug(`hasRestorableBody: ${hasRestorableBody}`);
+                    logDebug(`hasRestorableSelftext: ${hasRestorableSelftext}`);
+
+                    if (hasRestorableBody || hasRestorableSelftext) {
+                        logDebug('Restoring content from cache for', thingId);
                         displayRestoredContent(thingContainer, thingId, cachedResult);
+                    } else {
+                        logDebug('Content not restorable (already deleted in archive)');
                     }
+                } else if (typeof cachedResult === 'object' && !thingContainer) {
+                    logDebug('ERROR: Could not find thing container for content restoration');
                 }
             }
         } else {
