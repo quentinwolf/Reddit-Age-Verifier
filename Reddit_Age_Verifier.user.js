@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.844
+// @version      1.846
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -65,6 +65,17 @@ const PUSHSHIFT_TOKEN_URL = "https://api.pushshift.io/signup";
 // ============================================================================
 // USER SETTINGS
 // ============================================================================
+// Mass deletion service footers to detect
+const MASS_DELETION_FOOTERS = [
+    'mass deleted and anonymized with Redact',
+    'mass deleted with Redact',
+    'Unpost',
+    'Shreddit',
+    'Power Delete Suite',
+    'mass edited and deleted',
+    'account deleted with',
+    'nuked with'
+];
 
 const DEFAULT_SETTINGS = {
     debugMode: debugMode,
@@ -9287,6 +9298,78 @@ function initDeletedAuthorRestore() {
         }
     });
 
+    // ALSO check for mass-deleted/anonymized content (Redact, Unpost, etc.)
+    document.querySelectorAll('div.thing:not([data-mass-deletion-checked])').forEach(thing => {
+        const thingId = thing.dataset.fullname || thing.id?.replace('thing_', '');
+        if (!thingId) {
+            thing.setAttribute('data-mass-deletion-checked', 'true');
+            return;
+        }
+
+        // Mark as checked immediately to prevent reprocessing
+        thing.setAttribute('data-mass-deletion-checked', 'true');
+
+        // Check if author is NOT deleted (these services keep the account active)
+        const authorLink = thing.querySelector('.tagline a.author');
+        if (!authorLink || authorLink.textContent === '[deleted]') return;
+
+        // Check if content contains mass deletion footers
+        if (checkForMassDeletionFooter(thing)) {
+            logDebug('Found mass-deleted content with footer:', thingId);
+
+            // Check cache
+            const cachedResult = cache[thingId];
+            if (cachedResult && typeof cachedResult === 'object' &&
+                (cachedResult.body || cachedResult.selftext)) {
+                // Auto-restore from cache
+                logDebug('Auto-restoring mass-deleted content from cache for', thingId);
+                displayRestoredContent(thing, thingId, cachedResult, true);
+            } else {
+                // Inject Restore button in the tagline
+                const tagline = thing.querySelector('.tagline');
+                if (tagline && !tagline.querySelector('.restore-deleted-btn')) {
+                    logDebug('Injecting Restore button for mass-deleted content');
+                    // For mass deletion, we need a custom click handler
+                    const button = document.createElement('button');
+                    button.textContent = 'Restore';
+                    button.className = 'restore-deleted-btn';
+                    button.dataset.thingId = thingId;
+                    button.style.cssText = 'margin-left: 5px; font-size: 10px; padding: 1px 4px; cursor: pointer;';
+
+                    button.onclick = async () => {
+                        if (!apiToken) {
+                            button.disabled = true;
+                            button.textContent = 'Restoring...';
+                            GM_setValue('pendingRestoration', JSON.stringify({
+                                thingId: thingId,
+                                timestamp: Date.now()
+                            }));
+                            attemptAutoFetchToken();
+                            showTokenModal();
+                            return;
+                        }
+                        await performRestoration(tagline, button, thingId, null, true);
+                    };
+
+                    // Add right-click context menu
+                    button.oncontextmenu = (e) => {
+                        e.preventDefault();
+                        showRestoreContextMenu(e, button);
+                    };
+
+                    tagline.appendChild(button);
+                    restoreButtonRegistry.push({
+                        button: button,
+                        thingId: thingId,
+                        authorElement: tagline,
+                        cachedUsername: null,
+                        isMassDeletion: true
+                    });
+                }
+            }
+        }
+    });
+
 }
 
 // Check if the post/comment content is also deleted
@@ -9314,6 +9397,24 @@ function checkForDeletedContent(authorElement, thingId) {
     }
 
     return false;
+}
+
+// Check if the comment/post contains mass deletion service footers
+function checkForMassDeletionFooter(thing) {
+    const bodyMd = thing.querySelector('.entry .usertext-body > div.md');
+    if (!bodyMd) return false;
+
+    const bodyText = bodyMd.textContent || bodyMd.innerText;
+
+    // Check if body contains any of the mass deletion footers
+    const found = MASS_DELETION_FOOTERS.some(footer => bodyText.includes(footer));
+
+    if (bodyText.includes('mass deleted')) {
+        logDebug('[Mass Deletion Check] Body text:', bodyText.substring(0, 100));
+        logDebug('[Mass Deletion Check] Found match:', found);
+    }
+
+    return found;
 }
 
 // Extract thing ID from various Reddit DOM structures
@@ -9522,7 +9623,7 @@ async function restoreAll() {
         showNotificationBanner(`Restoring ${processedCount}/${totalItems}...`, 0, true);
 
         logDebug(`Restoring: ${entry.thingId}`);
-        const result = await performRestoration(entry.authorElement, entry.button, entry.thingId, entry.cachedUsername);
+        const result = await performRestoration(entry.authorElement, entry.button, entry.thingId, entry.cachedUsername, entry.isMassDeletion || false);
 
         if (result === 'success') {
             successCount++;
@@ -9572,7 +9673,7 @@ async function restoreAll() {
 
 // Perform the actual restoration (called by both direct click and resume flow)
 // Returns: 'success' if restored, 'deleted' if confirmed deleted, 'failed' if error
-async function performRestoration(authorElement, button, thingId, cachedUsername) {
+async function performRestoration(authorElement, button, thingId, cachedUsername, isMassDeletion = false) {
     button.disabled = true;
     button.textContent = 'Restoring...';
 
@@ -9613,7 +9714,7 @@ async function performRestoration(authorElement, button, thingId, cachedUsername
             logDebug('Body content:', result.body);
             logDebug('Selftext content:', result.selftext);
             // Pass the thing container directly instead of authorElement
-            displayRestoredContent(thingContainer, thingId, result);
+            displayRestoredContent(thingContainer, thingId, result, isMassDeletion);
         } else {
             logDebug('No content to restore - result is not an object or is null');
         }
@@ -9933,7 +10034,7 @@ function displayRestoredAuthor(authorElement, username, fullname = null, injectB
 }
 
 // Display restored content (comment body or submission selftext)
-function displayRestoredContent(thingContainer, thingId, postData) {
+function displayRestoredContent(thingContainer, thingId, postData, forceRestore = false) {
     logDebug('=== DISPLAY RESTORED CONTENT ===');
     logDebug('Thing ID:', thingId);
     logDebug('Thing container:', thingContainer);
@@ -9953,9 +10054,9 @@ function displayRestoredContent(thingContainer, thingId, postData) {
         return;
     }
 
-    // Check if the content body shows [deleted] or [removed]
+    // Check if the content body shows [deleted] or [removed] (or force restore for mass-deleted content)
     const bodyMd = thing.querySelector('.entry .usertext-body > div.md');
-    if (bodyMd) {
+    if (bodyMd && !forceRestore) {
         const currentText = bodyMd.textContent.trim();
         if (currentText !== '[deleted]' && currentText !== '[removed]' && currentText !== '[ Removed by Reddit ]') {
             logDebug('Content is not deleted, skipping restoration to avoid duplication');
