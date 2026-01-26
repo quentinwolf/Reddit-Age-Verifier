@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.846
+// @version      1.848
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -9370,6 +9370,79 @@ function initDeletedAuthorRestore() {
         }
     });
 
+    // ALSO check for edited content to restore original versions
+    document.querySelectorAll('div.thing:not([data-edited-checked])').forEach(thing => {
+        const thingId = thing.dataset.fullname || thing.id?.replace('thing_', '');
+        if (!thingId) {
+            thing.setAttribute('data-edited-checked', 'true');
+            return;
+        }
+
+        // Mark as checked immediately to prevent reprocessing
+        thing.setAttribute('data-edited-checked', 'true');
+
+        // Check if author is NOT deleted
+        const authorLink = thing.querySelector('.tagline a.author');
+        if (!authorLink || authorLink.textContent === '[deleted]') return;
+
+        // Check if content has been edited
+        if (checkForEditedContent(thing)) {
+            logDebug('Found edited content:', thingId);
+
+            // Check cache first
+            const cachedResult = cache[thingId];
+            if (cachedResult && typeof cachedResult === 'object' &&
+                (cachedResult.body || cachedResult.selftext)) {
+                // Auto-restore from cache
+                logDebug('Auto-restoring original content from cache for', thingId);
+                displayRestoredContent(thing, thingId, cachedResult, true);
+                return; // Skip button injection since we already restored
+            }
+
+            // Don't inject if already has a restore button
+            const tagline = thing.querySelector('.tagline');
+            if (tagline && !tagline.querySelector('.restore-original-btn')) {
+                // Create "Restore Original" button
+                const button = document.createElement('button');
+                button.textContent = 'Original';
+                button.className = 'restore-deleted-btn restore-original-btn';
+                button.dataset.thingId = thingId;
+                button.style.cssText = 'margin-left: 5px; font-size: 10px; padding: 1px 4px; cursor: pointer; background-color: #369;';
+                button.title = 'View original version before edits';
+
+                button.onclick = async () => {
+                    if (!apiToken) {
+                        button.disabled = true;
+                        button.textContent = 'Loading...';
+                        GM_setValue('pendingRestoration', JSON.stringify({
+                            thingId: thingId,
+                            timestamp: Date.now()
+                        }));
+                        attemptAutoFetchToken();
+                        showTokenModal();
+                        return;
+                    }
+                    await performRestoration(tagline, button, thingId, null, true);
+                };
+
+                // Add right-click context menu
+                button.oncontextmenu = (e) => {
+                    e.preventDefault();
+                    showRestoreContextMenu(e, button);
+                };
+
+                tagline.appendChild(button);
+                restoreButtonRegistry.push({
+                    button: button,
+                    thingId: thingId,
+                    authorElement: tagline,
+                    cachedUsername: null,
+                    isMassDeletion: true  // Use same flag to force content restoration
+                });
+            }
+        }
+    });
+
 }
 
 // Check if the post/comment content is also deleted
@@ -9415,6 +9488,13 @@ function checkForMassDeletionFooter(thing) {
     }
 
     return found;
+}
+
+// Check if the comment/post has been edited
+function checkForEditedContent(thing) {
+    // Look for the "edited-timestamp" element
+    const editedTimestamp = thing.querySelector('.edited-timestamp');
+    return editedTimestamp !== null;
 }
 
 // Extract thing ID from various Reddit DOM structures
