@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.850
+// @version      1.852
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -352,30 +352,26 @@ GM_addStyle(`
     .age-modal-title,
     .age-settings-label,
     .age-settings-section-title {
-        font-weight: inherit !important;
         font-style: normal !important;
         text-transform: none !important;
         letter-spacing: normal !important;
     }
 
-    /* Ensure buttons wrap text properly */
-    .age-modal-button {
+    /* ONLY settings cache buttons get wrapping - age verification buttons stay natural */
+    .age-settings-buttons-row {
+        display: flex !important;
+        flex-wrap: wrap !important;
+        gap: 10px !important;
+    }
+
+    .age-settings-buttons-row .age-modal-button {
         white-space: normal !important;
         word-wrap: break-word !important;
         overflow-wrap: break-word !important;
         text-align: center !important;
         min-width: 0 !important;
-        max-width: 100% !important;
-        width: auto !important;
-        flex-shrink: 1 !important;
-        display: inline-block !important;
-    }
-
-    /* Ensure button containers wrap properly */
-    .age-modal-buttons,
-    .age-settings-buttons-row {
-        display: flex !important;
-        flex-wrap: wrap !important;
+        max-width: 115px !important;
+        flex: 1 1 auto !important;
     }
 
     .age-check-button {
@@ -2430,8 +2426,8 @@ function showSettingsModal() {
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
     modal.dataset.modalId = modalId;
-    modal.style.minWidth = '565px';
-    modal.style.width = '565px';
+    modal.style.minWidth = '580px';
+    modal.style.width = '580px';
     modal.style.height = '80vh';
     modal.style.zIndex = ++zIndexCounter;
 
