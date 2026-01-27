@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.848
+// @version      1.849
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -2384,6 +2384,9 @@ function showTrackedSubredditsModal() {
 }
 
 function showSettingsModal() {
+    // Re-check token from storage to ensure accurate status display
+    loadToken();
+
     const modalId = `age-modal-${modalCounter++}`;
 
     const modal = document.createElement('div');
@@ -3190,8 +3193,7 @@ function showSettingsModal() {
     clearTokenBtn.onclick = () => {
         if (confirm('Clear stored API token? You will need to authorize again.')) {
             clearToken();
-            closeModal();
-            alert('API token cleared!');
+            showNotificationBanner('API token cleared!', 2000);
         }
     };
 
@@ -3486,6 +3488,10 @@ function extractAgesFromText(text) {
 
 function searchUserAges(username) {
     return new Promise((resolve, reject) => {
+
+        // Re-check token from storage (in case another tab updated it)
+        loadToken();
+
         if (!apiToken) {
             reject(new Error('No API token available'));
             return;
@@ -5149,6 +5155,10 @@ function getCacheStatistics() {
 // Fetch user posting frequency data
 function searchUserFrequency(username, kind = 'comment') {
     return new Promise((resolve, reject) => {
+
+        // Re-check token from storage (in case another tab updated it)
+        loadToken();
+
         if (!apiToken) {
             reject(new Error('No API token available'));
             return;
@@ -5833,6 +5843,10 @@ function formatDuration(seconds) {
 
 // Show frequency modal
 async function showFrequencyModal(username) {
+
+    // Re-check token from storage (in case another tab updated it)
+    loadToken();
+
     // Check for token
     if (!apiToken) {
         attemptAutoFetchToken();
@@ -6216,6 +6230,10 @@ function buildSubredditResultsHTML(items, kind, username) {
 // Fetch with pagination support
 function searchUserFrequencyPaginated(username, kind = 'comment', beforeTimestamp = null) {
     return new Promise((resolve, reject) => {
+
+        // Re-check token from storage (in case another tab updated it)
+        loadToken();
+
         if (!apiToken) {
             reject(new Error('No API token available'));
             return;
@@ -6395,6 +6413,10 @@ function attachFrequencyHandlers(modal) {
 
 function searchUserAgesWithPagination(username, beforeTimestamp = null, limit = null) {
     return new Promise((resolve, reject) => {
+
+        // Re-check token from storage (in case another tab updated it)
+        loadToken();
+
         if (!apiToken) {
             reject(new Error('No API token available'));
             return;
@@ -6601,6 +6623,10 @@ function escapeHtml(text) {
 
 function performManualSearch(params) {
     return new Promise((resolve, reject) => {
+
+        // Re-check token from storage (in case another tab updated it)
+        loadToken();
+
         if (!apiToken) {
             reject(new Error('No API token available'));
             return;
@@ -9337,6 +9363,10 @@ function initDeletedAuthorRestore() {
                     button.style.cssText = 'margin-left: 5px; font-size: 10px; padding: 1px 4px; cursor: pointer;';
 
                     button.onclick = async () => {
+
+                        // Re-check token from storage (in case another tab updated it)
+                        loadToken();
+
                         if (!apiToken) {
                             button.disabled = true;
                             button.textContent = 'Restoring...';
@@ -9411,6 +9441,10 @@ function initDeletedAuthorRestore() {
                 button.title = 'View original version before edits';
 
                 button.onclick = async () => {
+
+                    // Re-check token from storage (in case another tab updated it)
+                    loadToken();
+
                     if (!apiToken) {
                         button.disabled = true;
                         button.textContent = 'Loading...';
@@ -9570,6 +9604,10 @@ function injectRestoreButton(authorElement, thingId, cachedUsername) {
     button.style.cssText = 'margin-left: 5px; font-size: 10px; padding: 1px 4px; cursor: pointer;';
 
     button.onclick = async () => {
+
+        // Re-check token from storage (in case another tab updated it)
+        loadToken();
+
         // Check if we have a token first
         if (!apiToken) {
             button.disabled = true;
@@ -9658,6 +9696,10 @@ function showRestoreContextMenu(event, button) {
 
 // Restore all deleted authors and content on the page
 async function restoreAll() {
+
+    // Re-check token from storage (in case another tab updated it)
+    loadToken();
+
     if (!apiToken) {
         showNotificationBanner('Fetching API token... Please authorize when prompted.', 4000);
         attemptAutoFetchToken();
@@ -9883,6 +9925,10 @@ async function resumeRestoration(thingId) {
 // Query PushShift for deleted author
 async function fetchDeletedAuthor(thingId) {
     try {
+
+        // Re-check token from storage (in case another tab updated it)
+        loadToken();
+
         if (!apiToken) {
             logDebug('No API token available for deleted author restoration');
             return null;
@@ -10624,6 +10670,9 @@ async function handleAgeCheck(username) {
         return;
     }
 
+    // Re-check token from storage (in case another tab updated it)
+    loadToken();
+
     // Check if we have a token
     if (!apiToken) {
         attemptAutoFetchToken(); // Always returns false, logs message
@@ -10846,6 +10895,10 @@ async function handleDeepAnalysisQuick(username) {
         const analysis = performDeepAnalysis(cached, username);
         showDeepAnalysisModal(username, cached, analysis);
     } else {
+
+        // Re-check token from storage (in case another tab updated it)
+        loadToken();
+
         // Need to fetch data first
         if (!apiToken) {
             attemptAutoFetchToken();
