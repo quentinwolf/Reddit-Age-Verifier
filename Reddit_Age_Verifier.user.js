@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.849
+// @version      1.850
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -340,6 +340,44 @@ const OAUTH_FLOW_TIMEOUT = 60 * 1000; // 60 seconds
 // ============================================================================
 
 GM_addStyle(`
+    /* Targeted CSS isolation - only reset problematic inherited properties */
+    .age-modal,
+    .age-modal * {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+        box-sizing: border-box !important;
+    }
+
+    /* Reset only on elements that shouldn't have subreddit text styling */
+    .age-modal-button,
+    .age-modal-title,
+    .age-settings-label,
+    .age-settings-section-title {
+        font-weight: inherit !important;
+        font-style: normal !important;
+        text-transform: none !important;
+        letter-spacing: normal !important;
+    }
+
+    /* Ensure buttons wrap text properly */
+    .age-modal-button {
+        white-space: normal !important;
+        word-wrap: break-word !important;
+        overflow-wrap: break-word !important;
+        text-align: center !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        width: auto !important;
+        flex-shrink: 1 !important;
+        display: inline-block !important;
+    }
+
+    /* Ensure button containers wrap properly */
+    .age-modal-buttons,
+    .age-settings-buttons-row {
+        display: flex !important;
+        flex-wrap: wrap !important;
+    }
+
     .age-check-button {
         margin: 3px;
         padding: 2px 6px;
