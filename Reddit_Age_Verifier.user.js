@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.852
+// @version      1.853
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -6762,13 +6762,19 @@ function highlightSearchTerms(text, searchTerms) {
 
     let highlighted = escapeHtml(text);
 
-    // Split search terms by spaces and highlight each
-    searchTerms.forEach(term => {
-        if (term.length < 2) return; // Skip very short terms
+    // Sort terms by length (longest first) to avoid substring conflicts
+    const sortedTerms = [...searchTerms].sort((a, b) => b.length - a.length);
 
-        const regex = new RegExp(`(${escapeRegExp(term)})`, 'gi');
+    // Build a single regex pattern with word boundaries to match whole words only
+    const pattern = sortedTerms
+        .filter(term => term.length >= 2)
+        .map(term => `\\b${escapeRegExp(term)}\\b`)
+        .join('|');
+
+    if (pattern) {
+        const regex = new RegExp(`(${pattern})`, 'gi');
         highlighted = highlighted.replace(regex, '<span class="highlight-search-term">$1</span>');
-    });
+    }
 
     return highlighted;
 }
@@ -6798,6 +6804,10 @@ function extractSubmissionContext(buttonElement) {
             console.warn('Could not extract submission title');
             return null;
         }
+
+        // Remove age prefix patterns from the start of the title
+        // Matches patterns like: [35], (35M), {35F}, [M35], 35M, [35M4F], etc.
+        title = title.replace(/^[\[\(\{]?\s*[MF]?\d{2,3}[MF]?(?:[\/\s]*[MF]?\d{2,3}[MF]?)?\s*[\]\)\}]?\s*/i, '');
 
         // Strip punctuation to improve search matching
         title = title.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()'"?]/g, ' ')
