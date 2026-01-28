@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.855
+// @version      1.856
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -1690,7 +1690,7 @@ function handleOAuthAutoClick() {
                                 </div>
                             `;
 
-                            setTimeout(() => window.close(), 2000);
+                            setTimeout(() => window.close(), 450);
 
                         }
                     } catch (e) {
@@ -1711,7 +1711,7 @@ function handleOAuthAutoClick() {
                                 </div>
                             `;
 
-                            setTimeout(() => window.close(), 2000);
+                            setTimeout(() => window.close(), 450);
                         }
                     }
                 } else {
