@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.853
+// @version      1.854
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -6797,24 +6797,52 @@ function extractSubmissionContext(buttonElement) {
             return null;
         }
 
-        const titleElement = thingContainer.querySelector('p.title > a.title');
+        // Try multiple selectors for title - different page contexts use different structures
+        let titleElement = thingContainer.querySelector('p.title > a.title') ||
+                          thingContainer.querySelector('a.title') ||
+                          thingContainer.querySelector('p.title a');
+
         let title = titleElement ? titleElement.textContent.trim() : null;
 
         if (!title) {
             console.warn('Could not extract submission title');
+            logDebug('Thing container HTML:', thingContainer.innerHTML.substring(0, 500));
             return null;
         }
 
-        // Remove age prefix patterns from the start of the title
-        // Matches patterns like: [35], (35M), {35F}, [M35], 35M, [35M4F], etc.
-        title = title.replace(/^[\[\(\{]?\s*[MF]?\d{2,3}[MF]?(?:[\/\s]*[MF]?\d{2,3}[MF]?)?\s*[\]\)\}]?\s*/i, '');
+        logDebug('Original title extracted:', title);
+
+        // Check if age is at the beginning or end BEFORE removing it
+        const ageAtStart = /^[\[\(\{]\s*[MF]?\d{2,3}[MFs]?(?:[\/\s4]*[MF]?\d{2,3}[MFs]?)?\s*[\]\)\}]/i.test(title) ||
+                          /^\b[MF]\d{2,3}\b|\b\d{2,3}[MFs]\b/i.test(title);
+        const ageAtEnd = /[\[\(\{]\s*[MF]?\d{2,3}[MFs]?(?:[\/\s4]*[MF]?\d{2,3}[MFs]?)?\s*[\]\)\}]\s*$/i.test(title) ||
+                        /\b[MF]\d{2,3}\b|\b\d{2,3}[MFs]\b\s*$/i.test(title);
+
+        // Remove age patterns from anywhere in the title
+        // Matches: [35], (35M), {F35}, [35M4F], 35M, M35, etc.
+        title = title
+            // Remove bracketed ages: [35], (35M), {F35}, [35/36], [35M4F], etc.
+            .replace(/[\[\(\{]\s*[MF]?\d{2,3}[MFs]?(?:[\/\s4]*[MF]?\d{2,3}[MFs]?)?\s*[\]\)\}]/gi, '')
+            // Remove standalone ages with gender markers: 35M, M35, 35F, F35
+            .replace(/\b[MF]\d{2,3}\b|\b\d{2,3}[MF]\b/gi, '');
 
         // Strip punctuation to improve search matching
         title = title.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()'"?]/g, ' ')
                      .replace(/\s+/g, ' ')  // Replace multiple spaces with single space
                      .trim();
 
-        const commentsLink = thingContainer.querySelector('ul.flat-list.buttons > li.first > a');
+        logDebug('Cleaned title:', title);
+        logDebug('Age at start:', ageAtStart, 'Age at end:', ageAtEnd);
+
+        // Wrap in quotes for exact matching if age was at beginning or end
+        if (ageAtStart || ageAtEnd) {
+            title = `"${title}"`;
+        }
+
+        logDebug('Final title for search:', title);
+
+        const commentsLink = thingContainer.querySelector('ul.flat-list.buttons > li.first > a') ||
+                            thingContainer.querySelector('a.comments');
 
         if (!commentsLink || !commentsLink.href) {
             console.warn('Could not find comments link for subreddit extraction');
@@ -6828,6 +6856,8 @@ function extractSubmissionContext(buttonElement) {
             console.warn('Could not extract subreddit from comments link');
             return null;
         }
+
+        logDebug('Extracted subreddit:', subreddit);
 
         return { title, subreddit };
 
@@ -6920,7 +6950,7 @@ function showManualSearchModal(options = {}) {
                 <div class="manual-search-field">
                     <label class="manual-search-label">Search Input</label>
                     <input type="text" class="manual-search-input" id="ms-query"
-                               value="${searchInput || ''}" placeholder="Keywords to search for">
+                               value='${searchInput || ''}' placeholder="Keywords to search for">
                 </div>
 
                 <div class="manual-search-checkbox-group">
@@ -7175,7 +7205,7 @@ function showManualSearchResults(searchData) {
                     <div class="manual-search-field">
                         <label class="manual-search-label">Search Input</label>
                         <input type="text" class="manual-search-input" id="ms-query"
-                               value="${params.query || ''}" placeholder="Query or Reddit Object Fullname">
+                               value='${params.query || ''}' placeholder="Query or Reddit Object Fullname">
                     </div>
 
                     <div class="manual-search-checkbox-group">
