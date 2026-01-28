@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.854
+// @version      1.855
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -6797,20 +6797,13 @@ function extractSubmissionContext(buttonElement) {
             return null;
         }
 
-        // Try multiple selectors for title - different page contexts use different structures
-        let titleElement = thingContainer.querySelector('p.title > a.title') ||
-                          thingContainer.querySelector('a.title') ||
-                          thingContainer.querySelector('p.title a');
-
+        const titleElement = thingContainer.querySelector('p.title > a.title');
         let title = titleElement ? titleElement.textContent.trim() : null;
 
         if (!title) {
             console.warn('Could not extract submission title');
-            logDebug('Thing container HTML:', thingContainer.innerHTML.substring(0, 500));
             return null;
         }
-
-        logDebug('Original title extracted:', title);
 
         // Check if age is at the beginning or end BEFORE removing it
         const ageAtStart = /^[\[\(\{]\s*[MF]?\d{2,3}[MFs]?(?:[\/\s4]*[MF]?\d{2,3}[MFs]?)?\s*[\]\)\}]/i.test(title) ||
@@ -6831,18 +6824,12 @@ function extractSubmissionContext(buttonElement) {
                      .replace(/\s+/g, ' ')  // Replace multiple spaces with single space
                      .trim();
 
-        logDebug('Cleaned title:', title);
-        logDebug('Age at start:', ageAtStart, 'Age at end:', ageAtEnd);
-
         // Wrap in quotes for exact matching if age was at beginning or end
         if (ageAtStart || ageAtEnd) {
             title = `"${title}"`;
         }
 
-        logDebug('Final title for search:', title);
-
-        const commentsLink = thingContainer.querySelector('ul.flat-list.buttons > li.first > a') ||
-                            thingContainer.querySelector('a.comments');
+        const commentsLink = thingContainer.querySelector('ul.flat-list.buttons > li.first > a');
 
         if (!commentsLink || !commentsLink.href) {
             console.warn('Could not find comments link for subreddit extraction');
@@ -6856,8 +6843,6 @@ function extractSubmissionContext(buttonElement) {
             console.warn('Could not extract subreddit from comments link');
             return null;
         }
-
-        logDebug('Extracted subreddit:', subreddit);
 
         return { title, subreddit };
 
