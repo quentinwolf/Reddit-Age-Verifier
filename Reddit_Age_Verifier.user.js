@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.856
+// @version      1.858
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -40,6 +40,7 @@
 
 // Debug Mode
 let debugMode = true; // Set to 'true' for console logs
+let debugThingsOutput = true; // Set to 'true' for logging of thingIds
 
 // Search configuration
 let MIN_AGE = 10;                // Minimum age to search for
@@ -2004,9 +2005,9 @@ function showTokenModal(pendingUsername = null) {
             if (pendingRestorationStr) {
                 try {
                     const pendingRestoration = JSON.parse(pendingRestorationStr);
-                    logDebug("Age Verifier: Continuing with pending restoration for:", pendingRestoration.thingId);
+                    logDebug("Age Verifier: Continuing with pending restoration for:", pendingRestoration.thingId, "isMassDeletion:", pendingRestoration.isMassDeletion);
                     setTimeout(() => {
-                        resumeRestoration(pendingRestoration.thingId);
+                        resumeRestoration(pendingRestoration.thingId, pendingRestoration.isMassDeletion || false);
                     }, 100);
                 } catch (e) {
                     logDebug("Age Verifier: Failed to parse pending restoration:", e);
@@ -9232,7 +9233,7 @@ function cacheDeletedContent(thingId, data) {
 }
 
 // Get cached author for a thing ID
-function getCachedDeletedAuthor(thingId) {
+function getCachedDeletedContent(thingId) {
     const cache = getDeletedContentCache();
     return cache[thingId] || null;
 }
@@ -9431,7 +9432,8 @@ function initDeletedAuthorRestore() {
                             button.textContent = 'Restoring...';
                             GM_setValue('pendingRestoration', JSON.stringify({
                                 thingId: thingId,
-                                timestamp: Date.now()
+                                timestamp: Date.now(),
+                                isMassDeletion: true
                             }));
                             attemptAutoFetchToken();
                             showTokenModal();
@@ -9509,13 +9511,15 @@ function initDeletedAuthorRestore() {
                         button.textContent = 'Loading...';
                         GM_setValue('pendingRestoration', JSON.stringify({
                             thingId: thingId,
-                            timestamp: Date.now()
+                            timestamp: Date.now(),
+                            isMassDeletion: true
                         }));
                         attemptAutoFetchToken();
                         showTokenModal();
                         return;
                     }
                     await performRestoration(tagline, button, thingId, null, true);
+
                 };
 
                 // Add right-click context menu
@@ -9592,24 +9596,29 @@ function checkForEditedContent(thing) {
 
 // Extract thing ID from various Reddit DOM structures
 function extractThingId(authorElement) {
-    logDebug('=== EXTRACT THING ID ===');
-    logDebug('Author element:', authorElement);
-
+    if (debugThingsOutput) {
+        logDebug('=== EXTRACT THING ID ===');
+        logDebug('Author element:', authorElement);
+    }
     // PRIORITY: For comments, always try to find the direct parent thing first
     // Strategy 1: Look for closest parent div with id="thing_t1_xxx" (comment)
     let parent = authorElement.closest('div.thing[id^="thing_t1_"]');
     if (parent && parent.id) {
         const thingId = parent.id.replace('thing_', '');
-        logDebug('Strategy 1 (thing_t1_ id - COMMENT) found:', thingId);
-        logDebug('Parent element:', parent);
+        if (debugThingsOutput) {
+            logDebug('Strategy 1 (thing_t1_ id - COMMENT) found:', thingId);
+            logDebug('Parent element:', parent);
+        }
         return thingId;
     }
 
     // Strategy 2: Look for parent with data-fullname starting with t1_ (comment)
     parent = authorElement.closest('[data-fullname^="t1_"]');
     if (parent && parent.dataset.fullname) {
-        logDebug('Strategy 2 (data-fullname t1_ - COMMENT) found:', parent.dataset.fullname);
-        logDebug('Parent element:', parent);
+        if (debugThingsOutput) {
+            logDebug('Strategy 2 (data-fullname t1_ - COMMENT) found:', parent.dataset.fullname);
+            logDebug('Parent element:', parent);
+        }
         return parent.dataset.fullname;
     }
 
@@ -9617,16 +9626,20 @@ function extractThingId(authorElement) {
     parent = authorElement.closest('div.thing[id^="thing_"]');
     if (parent && parent.id) {
         const thingId = parent.id.replace('thing_', '');
-        logDebug('Strategy 3 (thing_ id - FALLBACK) found:', thingId);
-        logDebug('Parent element:', parent);
+        if (debugThingsOutput) {
+            logDebug('Strategy 3 (thing_ id - FALLBACK) found:', thingId);
+            logDebug('Parent element:', parent);
+        }
         return thingId;
     }
 
     // Strategy 4: Look for parent with any data-fullname
     parent = authorElement.closest('[data-fullname]');
     if (parent && parent.dataset.fullname) {
-        logDebug('Strategy 4 (data-fullname - FALLBACK) found:', parent.dataset.fullname);
-        logDebug('Parent element:', parent);
+        if (debugThingsOutput) {
+            logDebug('Strategy 4 (data-fullname - FALLBACK) found:', parent.dataset.fullname);
+            logDebug('Parent element:', parent);
+        }
         return parent.dataset.fullname;
     }
 
@@ -9637,7 +9650,9 @@ function extractThingId(authorElement) {
         const commentMatch = parent.dataset.permalink.match(/\/comments\/[^\/]+\/[^\/]+\/([^\/]+)/);
         if (commentMatch) {
             const thingId = 't1_' + commentMatch[1];
-            logDebug('Strategy 5 (permalink - COMMENT) found:', thingId);
+            if (debugThingsOutput) {
+                logDebug('Strategy 5 (permalink - COMMENT) found:', thingId);
+            }
             return thingId;
         }
 
@@ -9645,12 +9660,16 @@ function extractThingId(authorElement) {
         const submissionMatch = parent.dataset.permalink.match(/\/comments\/([^\/]+)/);
         if (submissionMatch) {
             const thingId = 't3_' + submissionMatch[1];
-            logDebug('Strategy 5 (permalink - SUBMISSION) found:', thingId);
+            if (debugThingsOutput) {
+                logDebug('Strategy 5 (permalink - SUBMISSION) found:', thingId);
+            }
             return thingId;
         }
     }
 
-    logDebug('ERROR: No thing ID found!');
+    if (debugThingsOutput) {
+        logDebug('ERROR: No thing ID found!');
+    }
     return null;
 }
 
@@ -9863,7 +9882,7 @@ async function performRestoration(authorElement, button, thingId, cachedUsername
     logDebug('Author element:', authorElement);
 
     // If cached, use that; otherwise query PushShift
-    const result = cachedUsername || await fetchDeletedAuthor(thingId);
+    const result = cachedUsername || await fetchDeletedContent(thingId);
 
     logDebug('Fetch result:', result);
     logDebug('Result type:', typeof result);
@@ -9910,9 +9929,9 @@ async function performRestoration(authorElement, button, thingId, cachedUsername
 }
 
 // Resume a pending restoration after OAuth completes
-async function resumeRestoration(thingId) {
+async function resumeRestoration(thingId, isMassDeletion = false) {
     logDebug('=== RESUME RESTORATION FLOW START ===');
-    logDebug(`Resuming restoration for thingId: ${thingId}`);
+    logDebug(`Resuming restoration for thingId: ${thingId}, isMassDeletion: ${isMassDeletion}`);
 
     // Find the button for this thingId
     const button = document.querySelector(`.restore-deleted-btn[data-thing-id="${thingId}"]`);
@@ -9930,59 +9949,44 @@ async function resumeRestoration(thingId) {
     }
     logDebug('Tagline found:', tagline);
 
-    // Find the [deleted] span with data-restore-processed attribute
+    if (isMassDeletion) {
+        // Mass deletion / edited content: author exists, just restore content
+        logDebug('Mass deletion resume - calling performRestoration directly');
+        await performRestoration(tagline, button, thingId, null, true);
+        logDebug('=== RESUME RESTORATION FLOW END ===');
+        return;
+    }
+
+    // Regular deleted author flow - find the [deleted] element
     let authorElement = tagline.querySelector('[data-restore-processed="true"]');
 
-    // If not found by attribute, search for any span with [deleted] text
+    // If not found by attribute, search for any element with [deleted] text
+    // Reddit uses <em> for deleted authors, but could also be <span>
     if (!authorElement) {
-        const allSpans = tagline.querySelectorAll('span');
-        for (const span of allSpans) {
-            if (span.textContent.trim() === '[deleted]') {
-                authorElement = span;
+        const candidates = tagline.querySelectorAll('em, span');
+        for (const el of candidates) {
+            if (el.textContent.trim() === '[deleted]') {
+                authorElement = el;
                 break;
             }
         }
     }
 
     if (!authorElement) {
-        logDebug('ERROR: Could not find [deleted] span in tagline');
+        logDebug('ERROR: Could not find [deleted] element in tagline');
+        button.textContent = 'Failed';
+        button.disabled = false;
         return;
     }
 
     logDebug('authorElement found:', authorElement);
-    logDebug('authorElement.textContent:', authorElement.textContent);
-
-    // Now execute the exact same logic as the original onclick handler
-    button.disabled = true;
-    button.textContent = 'Restoring...';
-
-    // If cached, use that; otherwise query PushShift
-    const cachedResult = getCachedDeletedAuthor(thingId);
-    const result = cachedResult || await fetchDeletedAuthor(thingId);
-
-    // Handle both old string format and new object format
-    const username = typeof result === 'string' ? result : result?.username;
-    const fullname = typeof result === 'object' ? result?.fullname : null;
-
-    logDebug('Username returned:', username, 'Fullname:', fullname);
-
-    if (username === '[deleted]') {
-        displayConfirmedDeleted(authorElement);
-        cacheDeletedContent(thingId, result);
-        button.remove();
-    } else if (username) {
-        displayRestoredAuthor(authorElement, username, fullname);
-        cacheDeletedContent(thingId, result);
-        button.remove();
-    } else {
-        button.textContent = 'Failed';
-        button.disabled = false;
-    }
+    logDebug('Delegating to performRestoration');
+    await performRestoration(authorElement, button, thingId, null, false);
     logDebug('=== RESUME RESTORATION FLOW END ===');
 }
 
 // Query PushShift for deleted author
-async function fetchDeletedAuthor(thingId) {
+async function fetchDeletedContent(thingId) {
     try {
 
         // Re-check token from storage (in case another tab updated it)
@@ -10057,7 +10061,7 @@ async function fetchDeletedAuthor(thingId) {
         return null;
     } catch (error) {
         console.error('Error fetching deleted author:', error);
-        logDebug(`Exception in fetchDeletedAuthor:`, error);
+        logDebug(`Exception in fetchDeletedContent:`, error);
         return null;
     }
 }
