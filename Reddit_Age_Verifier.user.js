@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.858
+// @version      1.859
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -11240,9 +11240,8 @@ function processUserProfilePage() {
         return;
     }
 
-    // Extract username from h1 or URL
-    const username = usernameH1.textContent.trim() ||
-                     window.location.pathname.match(/\/user\/([^\/]+)/)?.[1];
+    // Extract username from URL (reliable - we're guaranteed to be on /user/* page)
+    const username = window.location.pathname.match(/\/user\/([^\/]+)/)?.[1];
 
     logDebug('Extracted username:', username);
 
@@ -11314,9 +11313,8 @@ function processUserProfilePage() {
         tbInner.setAttribute('data-subreddit', urlSubreddit); // Set fallback subreddit
 
         // Try to find a real thing ID from the first post/comment visible on the page
-        //const firstThing = document.querySelector('[data-fullname^="t3_"], [data-fullname^="t1_"]');
-        //const thingId = firstThing?.dataset?.fullname;
-        let thingId = "t1_hj2mt15"
+        const firstThing = document.querySelector('[data-fullname^="t3_"], [data-fullname^="t1_"]');
+        const thingId = firstThing?.dataset?.fullname || null;
 
         // Create M button (mod actions) - only if we have a valid thing ID
         let modBtn = null;
