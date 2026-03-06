@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.859
+// @version      1.860
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -335,6 +335,10 @@ let zIndexCounter = 10000; // Counter for z-index management
 
 let oauthFlowTimestamp = 0; // Track when we initiated OAuth flow
 const OAUTH_FLOW_TIMEOUT = 60 * 1000; // 60 seconds
+
+const usernotesCache = {}; // { subreddit: { ver, constants, users, timestamp } }
+//const USERNOTES_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const USERNOTES_CACHE_TTL = 20 * 1000; // 20 seconds for testint
 
 // ============================================================================
 // STYLES
@@ -1461,6 +1465,19 @@ GM_addStyle(`
         border-radius: 2px;
         font-weight: bold;
     }
+
+    /* New modmail toolbox button styling (Toolbox CSS not loaded on /mail/) */
+    .av-newmodmail-toolbar .tb-bracket-button {
+        cursor: pointer !important;
+        font-size: 11px !important;
+        color: #0079d3 !important;
+        text-decoration: none !important;
+        margin: 0 2px !important;
+        font-family: monospace, monospace !important;
+        display: inline !important;
+    }
+    .av-newmodmail-toolbar .tb-bracket-button::before { content: '[' !important; }
+    .av-newmodmail-toolbar .tb-bracket-button::after { content: ']' !important; }
 
 `);
 
@@ -11149,7 +11166,7 @@ function insertAfter(newNode, referenceNode) {
 }
 
 function extractUsernameFromUrl(url) {
-    const match = url.match(/reddit\.com\/user\/([^\/?#]+)/i);
+    const match = url.match(/reddit\.com\/user\/([^\/?#]+)/i) || url.match(/\/user\/([^\/?#]+)/i);
     return match ? decodeURIComponent(match[1].replace(/^u\//i, '')) : null;
 }
 
@@ -11197,6 +11214,67 @@ function processModReddit() {
             link.dataset.ageVerifierProcessed = 'true';
         }
     });
+}
+
+function processNewModmail() {
+    const userLinks = document.querySelectorAll('a[href^="/user/"]');
+    let foundNew = false;
+
+    userLinks.forEach(link => {
+        if (link.dataset.ageVerifierProcessed === 'true') return;
+
+        const username = extractUsernameFromUrl(link.href);
+        if (!username) return;
+
+        const button = createAgeCheckButton(username);
+        if (button === null) {
+            link.dataset.ageVerifierProcessed = 'true';
+            return;
+        }
+
+        if (link.parentElement) {
+            insertAfter(button, link);
+
+            const row = link.closest('rpl-inbox-row');
+            const subredditSpan = row?.querySelector('span.subreddit');
+            const rawSub = subredditSpan?.textContent?.trim() || '';
+            const subreddit = rawSub.replace(/^(\/?(r\/))+/i, '').trim();
+            logDebug(`[Modmail] Raw subreddit text: "${rawSub}" → parsed: "${subreddit}"`);
+
+            if (subreddit) {
+                const tbContainer = createToolboxButtons(username, subreddit, link, null);
+                tbContainer.classList.add('av-newmodmail-toolbar');
+
+                // Wire buttons with native handlers since Toolbox doesn't init on /mail/
+                tbContainer.querySelectorAll('a').forEach(a => {
+                    a.href = '#';
+                    a.addEventListener('click', e => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const u = a.getAttribute('data-author') || username;
+                        const s = a.getAttribute('data-subreddit') || subreddit;
+                        if (a.classList.contains('user-history-button')) {
+                            showManualSearchModal({ username: u, subreddit: s, searchType: 'comment', autoExecute: true });
+                        } else if (a.classList.contains('tb-usernote-button')) {
+                            showUsernotesModal(u, s);
+                        } else if (a.classList.contains('tb-user-profile')) {
+                            window.open(`https://old.reddit.com/user/${u}`, '_blank');
+                        } else if (a.classList.contains('global-mod-button')) {
+                            window.open(`https://old.reddit.com/r/${s}/about/log/?moderator-redditor=${u}`, '_blank');
+                        }
+                    });
+                });
+
+                insertAfter(tbContainer, button);
+                foundNew = true;
+            }
+
+            link.dataset.ageVerifierProcessed = 'true';
+        }
+    });
+
+    // Prefetch usernotes for newly visible subreddits after processing
+    if (foundNew) prefetchUsernotesForPage();
 }
 
 function processUserProfilePage() {
@@ -11367,11 +11445,344 @@ function processUserProfilePage() {
 }
 
 // ============================================================================
+// USERNOTES SYSTEM
+// ============================================================================
+
+async function getModhash() {
+    const resp = await fetch('https://www.reddit.com/api/me.json', { credentials: 'include' });
+    const data = await resp.json();
+    return { modhash: data.data?.modhash, username: data.data?.name };
+}
+
+async function decompressUsernoteBlob(blob) {
+    const binary = atob(blob);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const ds = new DecompressionStream('deflate');
+    const writer = ds.writable.getWriter();
+    const reader = ds.readable.getReader();
+
+    // Write and read concurrently to avoid backpressure deadlock on large blobs
+    const writePromise = (async () => {
+        await writer.write(bytes);
+        await writer.close();
+    })();
+
+    const chunks = [];
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+    }
+    await writePromise;
+
+    const total = chunks.reduce((a, b) => a + b.length, 0);
+    const out = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) { out.set(chunk, offset); offset += chunk.length; }
+    return JSON.parse(new TextDecoder().decode(out));
+}
+
+async function compressUsernoteBlob(usersObj) {
+    const json = JSON.stringify(usersObj);
+    const bytes = new TextEncoder().encode(json);
+    const cs = new CompressionStream('deflate');
+    const writer = cs.writable.getWriter();
+    const reader = cs.readable.getReader();
+
+    const writePromise = (async () => {
+        await writer.write(bytes);
+        await writer.close();
+    })();
+
+    const chunks = [];
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+    }
+    await writePromise;
+    const total = chunks.reduce((a, b) => a + b.length, 0);
+    const out = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) { out.set(chunk, offset); offset += chunk.length; }
+    let binary = '';
+    for (let i = 0; i < out.length; i++) binary += String.fromCharCode(out[i]);
+    return btoa(binary);
+}
+
+async function fetchUsernotes(subreddit, forceFresh = false) {
+    const key = subreddit.toLowerCase();
+    const cached = usernotesCache[key];
+    if (!forceFresh && cached && Date.now() - cached.timestamp < USERNOTES_CACHE_TTL) {
+        logDebug(`[Usernotes] Cache hit for r/${subreddit}`);
+        return cached;
+    }
+    logDebug(`[Usernotes] Fetching fresh for r/${subreddit}`);
+    const resp = await fetch(`https://www.reddit.com/r/${subreddit}/wiki/usernotes.json`, { credentials: 'include' });
+    if (!resp.ok) {
+        if (resp.status === 404) {
+            // No usernotes wiki page yet — return empty structure
+            const empty = { ver: 6, constants: { users: [], warnings: [] }, users: {}, timestamp: Date.now() };
+            usernotesCache[key] = empty;
+            return empty;
+        }
+        throw new Error(`Wiki fetch failed: ${resp.status}`);
+    }
+    const json = await resp.json();
+    const content = JSON.parse(json.data.content_md);
+    if (content.ver !== 6) throw new Error(`Unsupported usernotes schema version: ${content.ver}`);
+    const users = await decompressUsernoteBlob(content.blob);
+    logDebug(`[Usernotes] Fetched r/${subreddit} — keys in users object:`, Object.keys(users).slice(0, 10));
+    const result = { ver: content.ver, constants: content.constants, users, timestamp: Date.now() };
+    usernotesCache[key] = result;
+    return result;
+}
+
+async function fetchNoteTypes(subreddit) {
+    const DEFAULT_NOTE_TYPES = [
+        { key: 'gooduser',  color: '#46d160', text: 'Good Contributor' },
+        { key: 'spamwatch', color: '#ff00ff', text: 'Spam Watch' },
+        { key: 'spamwarn',  color: '#9c5def', text: 'Spam Warning' },
+        { key: 'abusewarn', color: '#ff8717', text: 'Abuse Warning' },
+        { key: 'ban',       color: '#ff585b', text: 'Ban' },
+        { key: 'permban',   color: '#960000', text: 'Permanent Ban' },
+        { key: 'botban',    color: '#222222', text: 'Bot Ban' },
+    ];
+    try {
+        const resp = await fetch(`https://www.reddit.com/r/${subreddit}/wiki/toolbox.json`, { credentials: 'include' });
+        if (!resp.ok) return DEFAULT_NOTE_TYPES;
+        const json = await resp.json();
+        const config = JSON.parse(json.data.content_md);
+        return config.usernoteColors?.length ? config.usernoteColors.map(t => ({
+            key: t.key, color: t.color || '#888', text: t.text
+        })) : DEFAULT_NOTE_TYPES;
+    } catch (e) {
+        return DEFAULT_NOTE_TYPES;
+    }
+}
+
+async function saveUsernote(subreddit, targetUsername, noteText, noteTypeKey, linkUrl = null) {
+    // ALWAYS fresh-fetch before writing to avoid clobbering concurrent notes
+    const fresh = await fetchUsernotes(subreddit, true);
+    const { modhash, username: modUsername } = await getModhash();
+
+    if (!modhash || !modUsername) throw new Error('Could not get modhash/mod username');
+
+    // Ensure mod is in constants.users (index is sacred - append only)
+    let modIndex = fresh.constants.users.indexOf(modUsername);
+    if (modIndex === -1) {
+        fresh.constants.users.push(modUsername);
+        modIndex = fresh.constants.users.length - 1;
+    }
+
+    // Ensure note type key is in constants.warnings (append only)
+    let warnIndex = fresh.constants.warnings.indexOf(noteTypeKey);
+    if (warnIndex === -1) {
+        fresh.constants.warnings.push(noteTypeKey);
+        warnIndex = fresh.constants.warnings.length - 1;
+    }
+
+    // Build note object
+    const note = {
+        t: Math.floor(Date.now() / 1000),
+        n: noteText,
+        m: modIndex,
+        w: warnIndex,
+    };
+    if (linkUrl) note.l = linkUrl;
+
+    // Add to users object
+    const existingKey = Object.keys(fresh.users).find(
+        k => k.toLowerCase() === targetUsername.toLowerCase()
+    ) || targetUsername;
+    if (!fresh.users[existingKey]) fresh.users[existingKey] = { ns: [] };
+    fresh.users[existingKey].ns.unshift(note);
+
+    // Recompress
+    const blob = await compressUsernoteBlob(fresh.users);
+
+    // Build wiki content
+    const wikiContent = JSON.stringify({
+        ver: 6,
+        constants: fresh.constants,
+        blob
+    });
+
+    // POST to wiki edit endpoint
+    const params = new URLSearchParams({
+        api_type: 'json',
+        content: wikiContent,
+        page: 'usernotes',
+        reason: 'Usernote added via Age Verifier',
+        uh: modhash
+    });
+
+    const saveResp = await fetch(`https://www.reddit.com/r/${subreddit}/api/wiki/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString()
+    });
+
+    if (!saveResp.ok) throw new Error(`Wiki save failed: ${saveResp.status}`);
+
+    // Update cache with the freshly saved state
+    usernotesCache[subreddit.toLowerCase()] = { ...fresh, users: fresh.users, timestamp: Date.now() };
+    logDebug(`[Usernotes] Saved note for u/${targetUsername} in r/${subreddit}`);
+}
+
+async function prefetchUsernotesForPage() {
+    // Collect unique subreddits visible on the new modmail page
+    const subreddits = new Set();
+    document.querySelectorAll('.tb-jsapi-author-container.av-newmodmail-toolbar').forEach(el => {
+        const sub = el.querySelector('[data-subreddit]')?.getAttribute('data-subreddit');
+        if (sub) subreddits.add(sub);
+    });
+    for (const sub of subreddits) {
+        try { await fetchUsernotes(sub); } catch (e) { logDebug(`[Usernotes] Prefetch failed for r/${sub}:`, e); }
+    }
+}
+
+async function showUsernotesModal(username, subreddit) {
+    const modalId = `age-modal-${modalCounter++}`;
+    const modal = document.createElement('div');
+    modal.className = 'age-modal resizable';
+    modal.dataset.modalId = modalId;
+    modal.style.width = '520px';
+    modal.style.height = '500px';
+    modal.style.zIndex = ++zIndexCounter;
+
+    modal.innerHTML = `
+        <div class="age-modal-header">
+            <div class="age-modal-title-row">
+                <div class="age-modal-title">Usernotes — u/${escapeHtml(username)} in r/${escapeHtml(subreddit)}</div>
+                <button class="age-modal-close">&times;</button>
+            </div>
+        </div>
+        <div class="age-modal-content" style="display:flex; flex-direction:column; gap:12px; overflow-y:auto;">
+            <div id="un-add-form" style="background:var(--av-surface); border:1px solid var(--av-border); border-radius:6px; padding:10px;">
+                <div style="font-weight:bold; margin-bottom:8px; font-size:12px;">Add Note</div>
+                <div style="display:flex; gap:8px; margin-bottom:8px;">
+                    <select id="un-type" class="age-settings-input" style="width:180px; font-size:12px;"></select>
+                    <input id="un-text" type="text" class="age-settings-input" placeholder="Note text..." style="flex:1; font-size:12px;">
+                </div>
+                <button id="un-save" class="age-modal-button" style="font-size:12px;">Save Note</button>
+                <span id="un-status" style="margin-left:10px; font-size:11px; color:var(--av-text-muted);"></span>
+            </div>
+            <div id="un-notes-list" style="flex:1; overflow-y:auto;">
+                <div style="color:var(--av-text-muted); font-size:12px; text-align:center; padding:20px;">Loading notes...</div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+    makeDraggable(modal);
+
+    const closeBtn = modal.querySelector('.age-modal-close');
+    closeBtn.onclick = () => { modal.remove(); resultsModals = resultsModals.filter(m => m.modalId !== modalId); };
+
+    resultsModals.push({ modalId, username: 'usernotes', modal });
+
+    // Load note types + existing notes
+    const [noteTypes, notesData] = await Promise.all([
+        fetchNoteTypes(subreddit).catch(() => []),
+        fetchUsernotes(subreddit).catch(e => ({ error: e.message }))
+    ]);
+
+    // Populate type dropdown
+    const typeSelect = modal.querySelector('#un-type');
+    noteTypes.forEach((t, i) => {
+        const opt = document.createElement('option');
+        opt.value = t.key;
+        opt.textContent = t.text;
+        opt.style.color = t.color;
+        typeSelect.appendChild(opt);
+    });
+
+    // Render existing notes
+    const notesList = modal.querySelector('#un-notes-list');
+    if (notesData.error) {
+        notesList.innerHTML = `<div style="color:var(--av-danger); padding:10px; font-size:12px;">Failed to load notes: ${escapeHtml(notesData.error)}</div>`;
+    } else {
+        renderNotesList(notesList, username, notesData, noteTypes);
+    }
+
+    // Save handler
+    modal.querySelector('#un-save').onclick = async () => {
+        const text = modal.querySelector('#un-text').value.trim();
+        const typeKey = modal.querySelector('#un-type').value;
+        const statusEl = modal.querySelector('#un-status');
+        if (!text) { statusEl.textContent = 'Note text required.'; return; }
+
+        const saveBtn = modal.querySelector('#un-save');
+        saveBtn.disabled = true;
+        statusEl.textContent = 'Saving...';
+
+        try {
+            const linkUrl = window.location.href;
+            await saveUsernote(subreddit, username, text, typeKey, linkUrl);
+            modal.querySelector('#un-text').value = '';
+            statusEl.textContent = '✓ Saved!';
+            // Refresh notes display
+            const refreshed = await fetchUsernotes(subreddit);
+            renderNotesList(modal.querySelector('#un-notes-list'), username, refreshed, noteTypes);
+            setTimeout(() => { statusEl.textContent = ''; }, 3000);
+        } catch (e) {
+            statusEl.textContent = `✗ Error: ${e.message}`;
+            logDebug('[Usernotes] Save error:', e);
+        } finally {
+            saveBtn.disabled = false;
+        }
+    };
+}
+
+function renderNotesList(container, username, notesData, noteTypes) {
+    const userKey = Object.keys(notesData.users || {}).find(
+        k => k.toLowerCase() === username.toLowerCase()
+    ) || username;
+    logDebug(`[Usernotes] Looking up "${username}" → matched key: "${userKey}", notes found: ${notesData.users?.[userKey]?.ns?.length ?? 0}`);
+    const userNotes = notesData.users?.[userKey]?.ns || [];
+    if (userNotes.length === 0) {
+        container.innerHTML = '<div style="color:var(--av-text-muted); font-size:12px; text-align:center; padding:20px;">No notes for this user.</div>';
+        return;
+    }
+    const typeMap = {};
+    noteTypes.forEach(t => typeMap[t.key] = t);
+
+    container.innerHTML = userNotes.map(note => {
+        const date = new Date(note.t * 1000).toLocaleString();
+        const mod = notesData.constants?.users?.[note.m] || 'unknown';
+        const typeKey = notesData.constants?.warnings?.[note.w] || '';
+        const type = typeMap[typeKey] || { text: typeKey || 'Note', color: '#888' };
+        const link = note.l ? `<a href="${escapeHtml(expandNoteLink(note.l))}" target="_blank" style="color:var(--av-link); font-size:10px; margin-left:6px;">🔗</a>` : '';
+        return `
+            <div style="border-bottom:1px solid var(--av-border); padding:8px 4px; font-size:12px;">
+                <span style="display:inline-block; background:${type.color}; color:#fff; border-radius:3px; padding:1px 5px; font-size:10px; font-weight:bold; margin-right:6px;">${escapeHtml(type.text)}</span>
+                <span style="color:var(--av-text);">${escapeHtml(note.n)}</span>${link}
+                <div style="color:var(--av-text-muted); font-size:10px; margin-top:3px;">by u/${escapeHtml(mod)} — ${date}</div>
+            </div>`;
+    }).join('');
+}
+
+function expandNoteLink(l) {
+    if (!l) return '#';
+    if (l.startsWith('http')) return l;
+    const commentMatch = l.match(/^l,([^,]+),([^,]+)$/);
+    if (commentMatch) return `https://www.reddit.com/comments/${commentMatch[1]}/_/${commentMatch[2]}`;
+    const submissionMatch = l.match(/^l,([^,]+)$/);
+    if (submissionMatch) return `https://www.reddit.com/comments/${submissionMatch[1]}`;
+    const modmailMatch = l.match(/^m,(.+)$/);
+    if (modmailMatch) return `https://www.reddit.com/message/messages/${modmailMatch[1]}`;
+    return '#';
+}
+
+// ============================================================================
 // INITIALIZATION
 // ============================================================================
 
 const isModReddit = location.hostname.includes('mod.reddit.com');
-const activeProcessor = isModReddit ? processModReddit : processOldReddit;
+const isNewModmail = location.hostname === 'www.reddit.com' && location.pathname.startsWith('/mail/');
+const activeProcessor = isModReddit ? processModReddit : (isNewModmail ? processNewModmail : processOldReddit);
 
 let debounceTimer;
 function debouncedMainLoop() {
@@ -11403,7 +11814,7 @@ GM_registerMenuCommand('📍 View Tracked Subreddits', () => {
 });
 
 // Initialize deleted author restoration on old/www reddit
-if (!isModReddit) {
+if (!isModReddit && !isNewModmail) {
     // Run on initial load
     initDeletedAuthorRestore();
 
