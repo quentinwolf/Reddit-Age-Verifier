@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.860
+// @version      1.861
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -11576,11 +11576,14 @@ async function saveUsernote(subreddit, targetUsername, noteText, noteTypeKey, li
         modIndex = fresh.constants.users.length - 1;
     }
 
-    // Ensure note type key is in constants.warnings (append only)
-    let warnIndex = fresh.constants.warnings.indexOf(noteTypeKey);
-    if (warnIndex === -1) {
-        fresh.constants.warnings.push(noteTypeKey);
-        warnIndex = fresh.constants.warnings.length - 1;
+    // Ensure note type key is in constants.warnings (append only), -1 = no type
+    let warnIndex = -1;
+    if (noteTypeKey) {
+        warnIndex = fresh.constants.warnings.indexOf(noteTypeKey);
+        if (warnIndex === -1) {
+            fresh.constants.warnings.push(noteTypeKey);
+            warnIndex = fresh.constants.warnings.length - 1;
+        }
     }
 
     // Build note object
@@ -11648,14 +11651,15 @@ async function showUsernotesModal(username, subreddit) {
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
     modal.dataset.modalId = modalId;
-    modal.style.width = '520px';
-    modal.style.height = '500px';
+    modal.style.width = '680px';
+    modal.style.height = '520px';
     modal.style.zIndex = ++zIndexCounter;
 
     modal.innerHTML = `
         <div class="age-modal-header">
             <div class="age-modal-title-row">
                 <div class="age-modal-title">Usernotes — u/${escapeHtml(username)} in r/${escapeHtml(subreddit)}</div>
+                <button id="un-refresh" title="Refresh notes" style="background:none; border:none; cursor:pointer; font-size:14px; color:var(--av-text-muted); padding:0 6px; line-height:1;" onmouseover="this.style.color='var(--av-text)'" onmouseout="this.style.color='var(--av-text-muted)'">↻</button>
                 <button class="age-modal-close">&times;</button>
             </div>
         </div>
@@ -11663,11 +11667,19 @@ async function showUsernotesModal(username, subreddit) {
             <div id="un-add-form" style="background:var(--av-surface); border:1px solid var(--av-border); border-radius:6px; padding:10px;">
                 <div style="font-weight:bold; margin-bottom:8px; font-size:12px;">Add Note</div>
                 <div style="display:flex; gap:8px; margin-bottom:8px;">
-                    <select id="un-type" class="age-settings-input" style="width:180px; font-size:12px;"></select>
-                    <input id="un-text" type="text" class="age-settings-input" placeholder="Note text..." style="flex:1; font-size:12px;">
+                    <select id="un-type" class="age-settings-input" style="width:200px; font-size:12px;"></select>
+                    <input id="un-text" type="text" class="age-settings-input" placeholder="something about the user..." style="flex:1; font-size:12px;">
                 </div>
-                <button id="un-save" class="age-modal-button" style="font-size:12px;">Save Note</button>
-                <span id="un-status" style="margin-left:10px; font-size:11px; color:var(--av-text-muted);"></span>
+                <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+                    <label style="display:flex; align-items:center; gap:5px; font-size:12px; cursor:pointer;">
+                        <input type="checkbox" id="un-include-link" checked style="cursor:pointer;">
+                        Include link to this modmail
+                    </label>
+                </div>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <button id="un-save" class="age-modal-button" style="font-size:12px;">Save for r/${escapeHtml(subreddit)}</button>
+                    <span id="un-status" style="font-size:11px; color:var(--av-text-muted);"></span>
+                </div>
             </div>
             <div id="un-notes-list" style="flex:1; overflow-y:auto;">
                 <div style="color:var(--av-text-muted); font-size:12px; text-align:center; padding:20px;">Loading notes...</div>
@@ -11681,6 +11693,22 @@ async function showUsernotesModal(username, subreddit) {
     const closeBtn = modal.querySelector('.age-modal-close');
     closeBtn.onclick = () => { modal.remove(); resultsModals = resultsModals.filter(m => m.modalId !== modalId); };
 
+    modal.querySelector('#un-refresh').onclick = async () => {
+        const refreshBtn = modal.querySelector('#un-refresh');
+        refreshBtn.style.opacity = '0.4';
+        refreshBtn.style.pointerEvents = 'none';
+        try {
+            delete usernotesCache[subreddit.toLowerCase()];
+            const refreshed = await fetchUsernotes(subreddit, true);
+            renderNotesList(modal.querySelector('#un-notes-list'), username, refreshed, noteTypes);
+        } catch (e) {
+            logDebug('[Usernotes] Refresh failed:', e);
+        } finally {
+            refreshBtn.style.opacity = '';
+            refreshBtn.style.pointerEvents = '';
+        }
+    };
+
     resultsModals.push({ modalId, username: 'usernotes', modal });
 
     // Load note types + existing notes
@@ -11691,13 +11719,30 @@ async function showUsernotesModal(username, subreddit) {
 
     // Populate type dropdown
     const typeSelect = modal.querySelector('#un-type');
-    noteTypes.forEach((t, i) => {
+
+    // Add "None" option first
+    const noneOpt = document.createElement('option');
+    noneOpt.value = '';
+    noneOpt.textContent = 'None';
+    typeSelect.appendChild(noneOpt);
+
+    noteTypes.forEach(t => {
         const opt = document.createElement('option');
         opt.value = t.key;
         opt.textContent = t.text;
         opt.style.color = t.color;
         typeSelect.appendChild(opt);
     });
+
+    // Pre-select last used note type from most recent note
+    const userKey = Object.keys(notesData.users || {}).find(
+        k => k.toLowerCase() === username.toLowerCase()
+    );
+    const lastNote = userKey ? notesData.users[userKey]?.ns?.[0] : null;
+    if (lastNote != null) {
+        const lastTypeKey = notesData.constants?.warnings?.[lastNote.w] || '';
+        if (lastTypeKey) typeSelect.value = lastTypeKey;
+    }
 
     // Render existing notes
     const notesList = modal.querySelector('#un-notes-list');
@@ -11719,7 +11764,8 @@ async function showUsernotesModal(username, subreddit) {
         statusEl.textContent = 'Saving...';
 
         try {
-            const linkUrl = window.location.href;
+            const includeLink = modal.querySelector('#un-include-link').checked;
+            const linkUrl = includeLink ? window.location.href : null;
             await saveUsernote(subreddit, username, text, typeKey, linkUrl);
             modal.querySelector('#un-text').value = '';
             statusEl.textContent = '✓ Saved!';
@@ -11749,19 +11795,35 @@ function renderNotesList(container, username, notesData, noteTypes) {
     const typeMap = {};
     noteTypes.forEach(t => typeMap[t.key] = t);
 
-    container.innerHTML = userNotes.map(note => {
-        const date = new Date(note.t * 1000).toLocaleString();
-        const mod = notesData.constants?.users?.[note.m] || 'unknown';
-        const typeKey = notesData.constants?.warnings?.[note.w] || '';
-        const type = typeMap[typeKey] || { text: typeKey || 'Note', color: '#888' };
-        const link = note.l ? `<a href="${escapeHtml(expandNoteLink(note.l))}" target="_blank" style="color:var(--av-link); font-size:10px; margin-left:6px;">🔗</a>` : '';
-        return `
-            <div style="border-bottom:1px solid var(--av-border); padding:8px 4px; font-size:12px;">
-                <span style="display:inline-block; background:${type.color}; color:#fff; border-radius:3px; padding:1px 5px; font-size:10px; font-weight:bold; margin-right:6px;">${escapeHtml(type.text)}</span>
-                <span style="color:var(--av-text);">${escapeHtml(note.n)}</span>${link}
-                <div style="color:var(--av-text-muted); font-size:10px; margin-top:3px;">by u/${escapeHtml(mod)} — ${date}</div>
-            </div>`;
-    }).join('');
+    container.innerHTML = `
+        <table style="width:100%; border-collapse:collapse; font-size:12px;">
+            <thead>
+                <tr style="border-bottom:2px solid var(--av-border);">
+                    <th style="text-align:left; padding:5px 8px; color:var(--av-text-muted); font-weight:600; width:140px;">Author</th>
+                    <th style="text-align:left; padding:5px 8px; color:var(--av-text-muted); font-weight:600;">Note</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${userNotes.map(note => {
+                    const date = new Date(note.t * 1000).toLocaleString();
+                    const mod = notesData.constants?.users?.[note.m] || 'unknown';
+                    const typeKey = (note.w >= 0 && note.w != null) ? (notesData.constants?.warnings?.[note.w] || '') : '';
+                    const type = typeKey ? (typeMap[typeKey] || { text: typeKey, color: '#888' }) : null;
+                    const link = note.l ? `<a href="${escapeHtml(expandNoteLink(note.l))}" target="_blank" style="color:var(--av-link); margin-left:6px;" title="${escapeHtml(expandNoteLink(note.l))}">🔗</a>` : '';
+                    return `
+                        <tr style="border-bottom:1px solid var(--av-border); background:var(--av-surface);">
+                            <td style="padding:7px 8px; vertical-align:top; color:var(--av-text);">
+                                u/${escapeHtml(mod)}
+                                <div style="color:var(--av-text-muted); font-size:10px; margin-top:2px;">${date}</div>
+                            </td>
+                            <td style="padding:7px 8px; vertical-align:top;">
+                                ${type ? `<span style="display:inline-block; background:${type.color}; color:#fff; border-radius:3px; padding:1px 6px; font-size:10px; font-weight:bold; margin-right:6px;">${escapeHtml(type.text)}</span>` : ''}
+                                <span style="color:var(--av-text);">${escapeHtml(note.n)}</span>${link}
+                            </td>
+                        </tr>`;
+                }).join('')}
+            </tbody>
+        </table>`;
 }
 
 function expandNoteLink(l) {
