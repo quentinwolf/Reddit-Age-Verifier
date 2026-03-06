@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.861
+// @version      1.862
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -11217,6 +11217,43 @@ function processModReddit() {
 }
 
 function processNewModmail() {
+    const isConversationView = /^\/mail\/[^/]+\/[^/]+/.test(location.pathname);
+    let conversationSubreddit = null;
+    if (isConversationView) {
+        logDebug('[Modmail] Conversation view detected, scanning for subreddit...');
+
+        // Try every .subreddit span on the page
+        const allSubSpans = document.querySelectorAll('span.subreddit, [class*="subreddit"]');
+        logDebug('[Modmail] Subreddit spans found:', Array.from(allSubSpans).map(s => `"${s.textContent.trim()}" (class: ${s.className})`));
+
+        // Try any /r/ links in the header area
+        const allSubLinks = document.querySelectorAll('a[href*="/r/"]');
+        logDebug('[Modmail] /r/ links found:', Array.from(allSubLinks).slice(0, 5).map(a => a.href));
+
+        const subSpan = allSubSpans[0];
+        if (subSpan) {
+            const raw = subSpan.textContent.trim();
+            conversationSubreddit = raw.replace(/^(\/?(r\/))+/i, '').trim() || null;
+            logDebug('[Modmail] conversationSubreddit from span:', conversationSubreddit);
+        }
+
+        if (!conversationSubreddit && allSubLinks.length) {
+            const m = allSubLinks[0].href.match(/\/r\/([^/?#]+)/);
+            conversationSubreddit = m?.[1] || null;
+            logDebug('[Modmail] conversationSubreddit from link:', conversationSubreddit);
+        }
+
+        // Debug: dump all user links and their nearest ancestors
+        document.querySelectorAll('a[href^="/user/"]').forEach(a => {
+            logDebug('[Modmail] User link:', a.href,
+                '| closest rpl-inbox-row:', !!a.closest('rpl-inbox-row'),
+                '| closest [id*="participants"]:', a.closest('[id*="participants"]')?.id,
+                '| parent tag:', a.parentElement?.tagName,
+                '| grandparent tag:', a.parentElement?.parentElement?.tagName
+            );
+        });
+    }
+
     const userLinks = document.querySelectorAll('a[href^="/user/"]');
     let foundNew = false;
 
@@ -11238,7 +11275,8 @@ function processNewModmail() {
             const row = link.closest('rpl-inbox-row');
             const subredditSpan = row?.querySelector('span.subreddit');
             const rawSub = subredditSpan?.textContent?.trim() || '';
-            const subreddit = rawSub.replace(/^(\/?(r\/))+/i, '').trim();
+            const subreddit = (rawSub ? rawSub.replace(/^(\/?(r\/))+/i, '').trim() : null)
+                || conversationSubreddit || '';
             logDebug(`[Modmail] Raw subreddit text: "${rawSub}" → parsed: "${subreddit}"`);
 
             if (subreddit) {
@@ -11256,7 +11294,21 @@ function processNewModmail() {
                         if (a.classList.contains('user-history-button')) {
                             showManualSearchModal({ username: u, subreddit: s, searchType: 'comment', autoExecute: true });
                         } else if (a.classList.contains('tb-usernote-button')) {
-                            showUsernotesModal(u, s);
+                            // On conversation view, thread ID is in the URL itself
+                            let threadUrl = null;
+                            const pathMatch = location.pathname.match(/\/mail\/[^/]+\/([^/]+)/);
+                            if (pathMatch) {
+                                threadUrl = `https://www.reddit.com/mail/all/${pathMatch[1]}`;
+                            } else {
+                                // On list view, get from the row container
+                                const convRow = a.closest('[id*="Conversation_"], [id*="conversation_"]');
+                                const idParts = convRow?.id?.split('_');
+                                const threadId = idParts?.[idParts.length - 1] || null;
+                                if (threadId) threadUrl = `https://www.reddit.com/mail/all/${threadId}`;
+                            }
+                            logDebug('[Usernotes] Thread URL for note link:', threadUrl);
+                            showUsernotesModal(u, s, threadUrl);
+
                         } else if (a.classList.contains('tb-user-profile')) {
                             window.open(`https://old.reddit.com/user/${u}`, '_blank');
                         } else if (a.classList.contains('global-mod-button')) {
@@ -11562,7 +11614,7 @@ async function fetchNoteTypes(subreddit) {
     }
 }
 
-async function saveUsernote(subreddit, targetUsername, noteText, noteTypeKey, linkUrl = null) {
+async function saveUsernote(subreddit, targetUsername, noteText, noteTypeKey, linkUrl = null, isModmail = false) {
     // ALWAYS fresh-fetch before writing to avoid clobbering concurrent notes
     const fresh = await fetchUsernotes(subreddit, true);
     const { modhash, username: modUsername } = await getModhash();
@@ -11589,11 +11641,19 @@ async function saveUsernote(subreddit, targetUsername, noteText, noteTypeKey, li
     // Build note object
     const note = {
         t: Math.floor(Date.now() / 1000),
-        n: noteText,
+        n: isModmail ? `[Modmail] ${noteText}` : noteText,
         m: modIndex,
         w: warnIndex,
     };
-    if (linkUrl) note.l = linkUrl;
+    if (linkUrl && linkUrl.trim() !== '') {
+        const modmailMatch = linkUrl.match(/\/mail\/[^/]+\/([a-z0-9]+)/i);
+        if (modmailMatch) {
+            // Store as l,THREADID shorthand — Toolbox strips unrecognized full URLs on re-save
+            note.l = `m,${modmailMatch[1]}`;
+        } else {
+            note.l = linkUrl.trim();
+        }
+    }
 
     // Add to users object
     const existingKey = Object.keys(fresh.users).find(
@@ -11646,7 +11706,7 @@ async function prefetchUsernotesForPage() {
     }
 }
 
-async function showUsernotesModal(username, subreddit) {
+async function showUsernotesModal(username, subreddit, threadUrl = null) {
     const modalId = `age-modal-${modalCounter++}`;
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
@@ -11765,8 +11825,8 @@ async function showUsernotesModal(username, subreddit) {
 
         try {
             const includeLink = modal.querySelector('#un-include-link').checked;
-            const linkUrl = includeLink ? window.location.href : null;
-            await saveUsernote(subreddit, username, text, typeKey, linkUrl);
+            const linkUrl = includeLink ? (threadUrl || window.location.href) : null;
+            await saveUsernote(subreddit, username, text, typeKey, linkUrl, !!threadUrl);
             modal.querySelector('#un-text').value = '';
             statusEl.textContent = '✓ Saved!';
             // Refresh notes display
@@ -11788,6 +11848,23 @@ function renderNotesList(container, username, notesData, noteTypes) {
     ) || username;
     logDebug(`[Usernotes] Looking up "${username}" → matched key: "${userKey}", notes found: ${notesData.users?.[userKey]?.ns?.length ?? 0}`);
     const userNotes = notesData.users?.[userKey]?.ns || [];
+
+    // Debug: dump raw notes with resolved fields for inspection
+    if (userNotes.length > 0) {
+        const debugNotes = userNotes.slice(0, 5).map(note => ({
+            text: note.n,
+            timestamp: note.t,
+            date: new Date(note.t * 1000).toISOString(),
+            mod: notesData.constants?.users?.[note.m] ?? `[index ${note.m}]`,
+            typeIndex: note.w,
+            typeKey: (note.w >= 0 && note.w != null) ? (notesData.constants?.warnings?.[note.w] ?? `[index ${note.w}]`) : 'none',
+            link_raw: (note.l && note.l !== '') ? note.l : null,
+            link_expanded: (note.l && note.l !== '') ? expandNoteLink(note.l) : null
+        }));
+        logDebug(`[Usernotes] Most recent ${debugNotes.length} notes for "${userKey}" (of ${userNotes.length} total):\n` +
+            JSON.stringify(debugNotes, null, 2));
+    }
+
     if (userNotes.length === 0) {
         container.innerHTML = '<div style="color:var(--av-text-muted); font-size:12px; text-align:center; padding:20px;">No notes for this user.</div>';
         return;
@@ -11809,7 +11886,7 @@ function renderNotesList(container, username, notesData, noteTypes) {
                     const mod = notesData.constants?.users?.[note.m] || 'unknown';
                     const typeKey = (note.w >= 0 && note.w != null) ? (notesData.constants?.warnings?.[note.w] || '') : '';
                     const type = typeKey ? (typeMap[typeKey] || { text: typeKey, color: '#888' }) : null;
-                    const link = note.l ? `<a href="${escapeHtml(expandNoteLink(note.l))}" target="_blank" style="color:var(--av-link); margin-left:6px;" title="${escapeHtml(expandNoteLink(note.l))}">🔗</a>` : '';
+                    const link = (note.l && note.l !== '') ? `<a href="${escapeHtml(expandNoteLink(note.l))}" target="_blank" style="color:var(--av-link); margin-left:6px;" title="${escapeHtml(expandNoteLink(note.l))}">🔗</a>` : '';
                     return `
                         <tr style="border-bottom:1px solid var(--av-border); background:var(--av-surface);">
                             <td style="padding:7px 8px; vertical-align:top; color:var(--av-text);">
@@ -11834,8 +11911,14 @@ function expandNoteLink(l) {
     const submissionMatch = l.match(/^l,([^,]+)$/);
     if (submissionMatch) return `https://www.reddit.com/comments/${submissionMatch[1]}`;
     const modmailMatch = l.match(/^m,(.+)$/);
-    if (modmailMatch) return `https://www.reddit.com/message/messages/${modmailMatch[1]}`;
-    return '#';
+    if (modmailMatch) {
+        const threadId = modmailMatch[1];
+        // Old modmail IDs are long numeric strings (e.g. 12345678)
+        // New modmail thread IDs are short alphanumeric (e.g. 39202a)
+        return /^\d{8,}$/.test(threadId)
+            ? `https://www.reddit.com/message/messages/${threadId}`
+            : `https://www.reddit.com/mail/all/${threadId}`;
+    }    return '#';
 }
 
 // ============================================================================
