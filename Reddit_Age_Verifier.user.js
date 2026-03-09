@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.864
+// @version      1.866
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -132,6 +132,8 @@ const DEFAULT_SETTINGS = {
         'auto_modmail': true,
         'evasion-guard': true,
     },
+    enableLiveFetch: true, // Auto-fetch live Reddit data alongside PushShift
+    liveFetchMaxPages: 10, // Max pages to iterate (100 items each, Reddit caps at ~1000)
     customButtons: [
         // Example: { id: 'clickme', label: 'Clickable Button', type: 'link', urlTemplate: 'https://someurl.here', enabled: true, style: 'danger', showInContextMenu: false }
         // Example: { id: 'verify', label: 'Verification', type: 'template', textTemplate: 'Your text here with {{author}}', enabled: true, style: 'primary', showInContextMenu: true }
@@ -678,6 +680,94 @@ GM_addStyle(`
 
     .age-result-link:hover {
         text-decoration: underline;
+    }
+
+    .age-source-badge {
+        font-size: 10px;
+        padding: 1px 6px;
+        border-radius: 3px;
+        font-weight: bold;
+        margin-left: 8px;
+        white-space: nowrap;
+    }
+
+    .age-source-badge.live {
+        background-color: rgba(70, 209, 96, 0.15);
+        color: var(--av-success);
+    }
+
+    .age-source-badge.archived {
+        background-color: rgba(255, 140, 66, 0.15);
+        color: var(--av-warning);
+    }
+
+    .age-source-badge.both {
+        background-color: rgba(92, 163, 245, 0.15);
+        color: var(--av-link);
+        cursor: pointer;
+    }
+
+    .age-source-badge.both:hover {
+        background-color: rgba(92, 163, 245, 0.3);
+    }
+
+    .freq-raw-table {
+        padding: 10px;
+    }
+
+    .freq-raw-cell {
+        padding: 2px 10px;
+        white-space: nowrap;
+        vertical-align: top;
+    }
+
+    .freq-raw-delta {
+        text-align: right;
+        color: var(--av-text-muted);
+        min-width: 80px;
+    }
+
+    .freq-raw-id {
+        text-align: left;
+        min-width: 90px;
+    }
+
+    .freq-raw-date {
+        text-align: left;
+        color: var(--av-text);
+        min-width: 170px;
+    }
+
+    .freq-raw-sub {
+        text-align: left;
+    }
+
+    .freq-delta-rapid {
+        color: var(--av-danger) !important;
+        font-weight: bold;
+    }
+
+    .freq-delta-fast {
+        color: var(--av-warning) !important;
+    }
+
+    .freq-raw-table thead th {
+        position: sticky;
+        top: 0;
+        background-color: var(--av-analysis-header);
+        padding: 6px 10px;
+    }
+
+    .timeline-live-badge {
+        font-size: 9px;
+        padding: 1px 5px;
+        border-radius: 3px;
+        background-color: rgba(70, 209, 96, 0.15);
+        color: var(--av-success);
+        font-weight: bold;
+        margin-left: 6px;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
     }
 
     .age-error {
@@ -2798,6 +2888,24 @@ function showSettingsModal() {
                 </div>
 
                 <div class="age-settings-row">
+                    <label class="age-settings-label">Auto-fetch Reddit Live Data</label>
+                    <input type="checkbox" class="age-settings-checkbox" id="setting-enable-live-fetch"
+                           ${userSettings.enableLiveFetch ? 'checked' : ''}>
+                </div>
+                <span class="age-settings-help-text" style="display: block; margin-top: -8px; margin-bottom: 12px;">
+                    Fetches current submissions &amp; comments from Reddit alongside PushShift archived data.
+                </span>
+
+                <div class="age-settings-row">
+                    <label class="age-settings-label">Live Fetch Max Pages (100 items/page)</label>
+                    <input type="number" class="age-settings-numberinput" id="setting-live-max-pages"
+                           value="${userSettings.liveFetchMaxPages}" min="1" max="10">
+                </div>
+                <span class="age-settings-help-text" style="display: block; margin-top: -8px; margin-bottom: 12px;">
+                    Reddit caps at ~1000 items total (10 pages). Higher = more data but slower.
+                </span>
+
+                <div class="age-settings-row">
                     <label class="age-settings-label">Restore All: Concurrent Workers</label>
                     <input type="number" class="age-settings-numberinput" id="setting-restore-workers"
                            value="${userSettings.restoreAllWorkers}" min="1" max="5">
@@ -3073,6 +3181,8 @@ function showSettingsModal() {
             trackedSubreddits: trackedSubreddits,
             showRestoreButtons: modal.querySelector('#showRestoreButtons').checked,
             autoRestoreDeletedAuthors: modal.querySelector('#autoRestoreDeletedAuthors').checked,
+            enableLiveFetch: modal.querySelector('#setting-enable-live-fetch').checked,
+            liveFetchMaxPages: parseInt(modal.querySelector('#setting-live-max-pages').value) || 10,
             minCouplesAgeGap: minCouplesGapValidated,
             timelineContextPosts: timelineContextValidated,
             timelineCompressionThreshold: timelineThresholdValidated,
@@ -3654,6 +3764,218 @@ function searchUserAges(username) {
 }
 
 // ============================================================================
+// REDDIT LIVE DATA FETCHING
+// ============================================================================
+
+/**
+ * Fetch a single page from Reddit's .json listing endpoint
+ * @param {string} username
+ * @param {string} kind - 'submitted', 'comments', or '' (overview)
+ * @param {string|null} after - pagination token
+ * @returns {Promise<{children: Array, after: string|null}>}
+ */
+function fetchRedditListingPage(username, kind = 'submitted', after = null) {
+    return new Promise((resolve, reject) => {
+        let url = `https://old.reddit.com/user/${encodeURIComponent(username)}`;
+        if (kind) url += `/${kind}`;
+        url += `.json?limit=100&raw_json=1`;
+        if (after) url += `&after=${after}`;
+
+        logDebug(`Reddit live fetch: ${url}`);
+
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: url,
+            headers: {
+                'Accept': 'application/json'
+            },
+            onload: function(response) {
+                if (response.status === 404) {
+                    // User doesn't exist or is suspended
+                    resolve({ children: [], after: null });
+                    return;
+                }
+                if (response.status === 403) {
+                    logDebug('Reddit live fetch: 403 forbidden (private/suspended account)');
+                    resolve({ children: [], after: null });
+                    return;
+                }
+                if (response.status === 429) {
+                    logDebug('Reddit live fetch: rate limited');
+                    reject(new Error('Reddit rate limit hit. Try again in a moment.'));
+                    return;
+                }
+                if (response.status !== 200) {
+                    reject(new Error(`Reddit API error: ${response.status}`));
+                    return;
+                }
+
+                try {
+                    const data = JSON.parse(response.responseText);
+                    const children = (data.data && data.data.children) || [];
+                    const afterToken = (data.data && data.data.after) || null;
+                    logDebug(`Reddit live fetch: got ${children.length} items, after=${afterToken}`);
+                    resolve({ children, after: afterToken });
+                } catch (error) {
+                    reject(new Error('Failed to parse Reddit JSON response'));
+                }
+            },
+            onerror: function() {
+                reject(new Error('Network error fetching Reddit live data'));
+            },
+            ontimeout: function() {
+                reject(new Error('Reddit live data request timed out'));
+            }
+        });
+    });
+}
+
+/**
+ * Normalize a Reddit listing item to match PushShift's flat format
+ * so existing processResults() works on both sources seamlessly
+ */
+function normalizeRedditLiveItem(child) {
+    const d = child.data;
+    const isComment = child.kind === 't1';
+
+    const normalized = {
+        id: d.id,
+        name: d.name, // fullname e.g. t3_abc123
+        author: d.author,
+        author_fullname: d.author_fullname || null,
+        subreddit: d.subreddit,
+        created_utc: d.created_utc,
+        score: d.score,
+        permalink: d.permalink,
+        _source: 'live',
+        _redditKind: child.kind, // t1=comment, t3=submission
+    };
+
+    if (isComment) {
+        normalized.body = d.body || '';
+        normalized.link_title = d.link_title || '';
+        normalized.link_id = d.link_id || '';
+        normalized.parent_id = d.parent_id || '';
+    } else {
+        normalized.title = d.title || '';
+        normalized.selftext = d.selftext || '';
+        normalized.url = d.url || '';
+        normalized.is_self = d.is_self;
+        normalized.num_comments = d.num_comments;
+        normalized.thumbnail = d.thumbnail || '';
+    }
+
+    return normalized;
+}
+
+/**
+ * Paginate through all available Reddit listing pages for a user
+ * @param {string} username
+ * @param {string} kind - 'submitted' or 'comments'
+ * @param {Function} onProgress - optional callback(pageNum, totalItems)
+ * @returns {Promise<Array>} normalized items
+ */
+async function fetchAllRedditLivePages(username, kind = 'submitted', onProgress = null) {
+    const maxPages = userSettings.liveFetchMaxPages || 10;
+    const allItems = [];
+    let afterToken = null;
+
+    for (let page = 0; page < maxPages; page++) {
+        const result = await fetchRedditListingPage(username, kind, afterToken);
+
+        const normalized = result.children
+            .filter(c => c.data && c.data.author && c.data.author !== '[deleted]')
+            .map(c => normalizeRedditLiveItem(c));
+
+        allItems.push(...normalized);
+
+        if (onProgress) onProgress(page + 1, allItems.length);
+
+        if (!result.after || result.children.length === 0) break;
+        afterToken = result.after;
+
+        // Small delay to be respectful
+        if (page < maxPages - 1 && result.after) {
+            await new Promise(r => setTimeout(r, 250));
+        }
+    }
+
+    logDebug(`Reddit live: fetched ${allItems.length} ${kind} for u/${username}`);
+    return allItems;
+}
+
+/**
+ * Fetch both submissions and comments for a user from Reddit live
+ * @param {string} username
+ * @param {Function} onProgress - optional callback(status)
+ * @returns {Promise<Array>} all normalized items
+ */
+async function fetchRedditLiveData(username, onProgress = null) {
+    const updateStatus = (msg) => { if (onProgress) onProgress(msg); };
+
+    updateStatus('Fetching live submissions...');
+    const submissions = await fetchAllRedditLivePages(username, 'submitted', (page, total) => {
+        updateStatus(`Live submissions: page ${page}, ${total} items...`);
+    });
+
+    updateStatus('Fetching live comments...');
+    const comments = await fetchAllRedditLivePages(username, 'comments', (page, total) => {
+        updateStatus(`Live comments: page ${page}, ${total} items...`);
+    });
+
+    const combined = [...submissions, ...comments];
+    logDebug(`Reddit live total: ${combined.length} items (${submissions.length} submissions, ${comments.length} comments)`);
+    return combined;
+}
+
+/**
+ * Merge PushShift (archived) and Reddit live data, deduplicating by post ID.
+ * Items present in both sources get _source='both' and store both versions.
+ *
+ * @param {Array} pushshiftResults - raw PushShift results
+ * @param {Array} liveResults - normalized Reddit live results
+ * @returns {Array} merged results with _source tags
+ */
+function mergeDataSources(pushshiftResults, liveResults) {
+    // Tag PushShift items
+    pushshiftResults.forEach(item => {
+        if (!item._source) item._source = 'archived';
+    });
+
+    // Build lookup by ID for PushShift items
+    const psById = new Map();
+    pushshiftResults.forEach(item => {
+        const id = item.id || (item.name && item.name.replace(/^t[0-9]_/, ''));
+        if (id) psById.set(id, item);
+    });
+
+    const merged = [...pushshiftResults];
+    const liveVersions = {}; // Store live versions keyed by ID for toggle
+
+    liveResults.forEach(liveItem => {
+        const id = liveItem.id;
+        const existing = psById.get(id);
+
+        if (existing) {
+            // Exists in both — tag it, store both versions
+            existing._source = 'both';
+            existing._liveVersion = liveItem;
+            liveVersions[id] = liveItem;
+        } else {
+            // Only in live — add to merged
+            liveItem._source = 'live';
+            merged.push(liveItem);
+        }
+    });
+
+    // Store live versions map on the array for later access
+    merged._liveVersions = liveVersions;
+
+    logDebug(`Merge: ${pushshiftResults.length} archived + ${liveResults.length} live = ${merged.length} merged (${Object.keys(liveVersions).length} overlapping)`);
+    return merged;
+}
+
+// ============================================================================
 // RESULT PROCESSING
 // ============================================================================
 
@@ -3734,12 +4056,15 @@ function processResults(results, username) {
                 possibleAges: foundAges.possible,
                 allAges: [...foundAges.posted, ...foundAges.possible],
                 date: formattedDate,
-                timestamp: post.created_utc,  // ADD THIS LINE - store raw timestamp
+                timestamp: post.created_utc,
                 subreddit: post.subreddit,
                 snippet: snippet,
                 permalink: `https://reddit.com${post.permalink}`,
                 title: title,
-                selftext: cleanSelftext
+                selftext: cleanSelftext,
+                _source: post._source || null,
+                _liveVersion: post._liveVersion || null,
+                _id: post.id || null
             });
         }
     });
@@ -4083,7 +4408,8 @@ function performDeepAnalysis(ageData, username) {
                     age: age,
                     isPotential: false,
                     subreddit: result.subreddit.toLowerCase(),
-                    permalink: result.permalink
+                    permalink: result.permalink,
+                    _source: result._source || null
                 });
             });
         }
@@ -4097,7 +4423,8 @@ function performDeepAnalysis(ageData, username) {
                         age: age,
                         isPotential: true,
                         subreddit: result.subreddit.toLowerCase(),
-                        permalink: result.permalink
+                        permalink: result.permalink,
+                        _source: result._source || null
                     });
                 }
             });
@@ -5895,29 +6222,49 @@ function buildFrequencyRawOutput(items, kind) {
     // Sort newest first
     const sorted = [...items].sort((a, b) => b.created_utc - a.created_utc);
 
-    const rows = sorted.map((item, index) => {
+    const tableRows = sorted.map((item, index) => {
         let delta = '';
+        let deltaClass = '';
         if (index > 0) {
             const secondsDelta = sorted[index - 1].created_utc - item.created_utc;
-            delta = secondsDelta.toString().padStart(10);
-        } else {
-            delta = ''.padStart(10);
+            delta = secondsDelta.toLocaleString();
+            // Color-code: red for rapid (<60s), orange for fast (<300s), default otherwise
+            if (secondsDelta < 60) deltaClass = 'freq-delta-rapid';
+            else if (secondsDelta < 300) deltaClass = 'freq-delta-fast';
         }
 
         const date = new Date(item.created_utc * 1000);
         const timestamp = date.toISOString().replace('T', ' ').substring(0, 19);
 
         const id = item.id || '';
+        const subreddit = item.subreddit || '';
         const permalink = kind === 'comment'
             ? `https://reddit.com${item.permalink}`
             : `https://reddit.com${item.permalink}`;
 
-        const subreddit = item.subreddit || '';
+        return `<tr>
+            <td class="freq-raw-cell freq-raw-delta ${deltaClass}">${delta}</td>
+            <td class="freq-raw-cell freq-raw-id"><a href="${permalink}" target="_blank" style="color: var(--av-link); text-decoration: none;">${escapeHtml(id)}</a></td>
+            <td class="freq-raw-cell freq-raw-date">${timestamp}</td>
+            <td class="freq-raw-cell freq-raw-sub"><span class="subreddit-filter-link" data-subreddit="${escapeHtml(subreddit)}" style="color: var(--av-link); cursor: pointer;">r/${escapeHtml(subreddit)}</span></td>
+        </tr>`;
+    }).join('');
 
-        return `${delta} ${id.padEnd(10)} ${timestamp} /r/${subreddit}/${kind}s/${id}/`;
-    }).join('\n');
-
-    return `<pre style="font-family: 'Courier New', monospace; font-size: 11px; line-height: 1.3; overflow-x: auto; background-color: var(--av-analysis-header); padding: 15px; border-radius: 4px;">${rows}</pre>`;
+    return `
+        <table class="freq-raw-table" style="width: 100%; border-collapse: collapse; font-family: 'Courier New', monospace; font-size: 11px; line-height: 1.3; background-color: var(--av-analysis-header); border-radius: 4px;">
+            <thead>
+                <tr style="border-bottom: 1px solid var(--av-border); color: var(--av-text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;">
+                    <th class="freq-raw-cell freq-raw-delta" style="text-align: right;">Delta (s)</th>
+                    <th class="freq-raw-cell freq-raw-id" style="text-align: left;">ID</th>
+                    <th class="freq-raw-cell freq-raw-date" style="text-align: left;">Timestamp</th>
+                    <th class="freq-raw-cell freq-raw-sub" style="text-align: left;">Subreddit</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${tableRows}
+            </tbody>
+        </table>
+    `;
 }
 
 function formatDuration(seconds) {
@@ -7465,6 +7812,13 @@ function showResultsModal(username, ageData) {
             ${estimateHTML}
             ${postedChipsHTML}
             ${possibleChipsHTML}
+            ${ageData._pushshiftCount !== undefined || ageData._liveCount !== undefined ?
+                `<p style="color: var(--av-text-muted); font-size: 11px; margin-top: 6px;">
+                    Sources: ${ageData._pushshiftCount || 0} archived (PushShift)
+                    ${ageData._pushshiftError ? '<span style="color: var(--av-danger);" title="' + escapeHtml(ageData._pushshiftError) + '">⚠️</span>' : ''}
+                    + ${ageData._liveCount || 0} live (Reddit)
+                    | ${Object.keys(ageData._liveVersions || {}).length} overlapping
+                </p>` : ''}
         </div>`;
     }
 
@@ -7495,6 +7849,15 @@ function showResultsModal(username, ageData) {
                 : '';
             const possibleBadge = result.possibleAges.length > 0
                 ? `<span style="color: var(--av-text-muted);">? ${result.possibleAges.join(', ')}</span>`
+                : '';
+
+            // Source badge
+            const sourceBadge = result._source === 'live'
+                ? '<span class="age-source-badge live" title="From Reddit (live)">🟢 Live</span>'
+                : result._source === 'both'
+                ? '<span class="age-source-badge both" title="Found in both PushShift and Reddit live (click to toggle)">🔵 Both</span>'
+                : result._source === 'archived'
+                ? '<span class="age-source-badge archived" title="From PushShift (archived)">🟠 Archived</span>'
                 : '';
 
             // Process title
@@ -7542,6 +7905,7 @@ function showResultsModal(username, ageData) {
                     <div class="age-result-header">
                         <span class="age-result-age">Age: ${postedBadge} ${possibleBadge} · <span class="age-result-subreddit"><a href='https://old.reddit.com/r/${result.subreddit}' target='_blank'>r/${result.subreddit}</a></span></span>
                         <span class="age-result-date">${result.date}</span>
+                        ${sourceBadge}
                     </div>
                     <div class="age-result-snippet" style="font-weight: 500; margin-bottom: ${bodyHTML ? '8px' : '0'};">
                         <span class="snippet-content" data-id="title-${index}" data-full="${escapeHtml(result.title)}">${highlightedTitle}</span>${titleExpandLink}${titleCollapseLink}
@@ -7577,6 +7941,7 @@ function showResultsModal(username, ageData) {
             <button class="age-modal-button recheck-age">Recheck Age</button>
             <button class="age-modal-button danger clear-user">Clear This User Cache</button>
             <button class="age-modal-button manual-search">Manual Search</button>
+            <button class="age-modal-button refetch-live" title="Re-fetch current Reddit data">🔄 Re-fetch Live</button>
             <button class="age-modal-button secondary">Close</button>
         </div>
     `;
@@ -7673,6 +8038,47 @@ function showResultsModal(username, ageData) {
     manualSearchBtn.onclick = () => {
         showManualSearchModal(username);
     };
+
+    const refetchLiveBtn = modal.querySelector('.refetch-live');
+    if (refetchLiveBtn) {
+        refetchLiveBtn.onclick = async () => {
+            refetchLiveBtn.disabled = true;
+            refetchLiveBtn.textContent = '🔄 Fetching...';
+            try {
+                const liveResults = await fetchRedditLiveData(username, (status) => {
+                    refetchLiveBtn.textContent = `🔄 ${status}`;
+                });
+
+                // Get current cached data and re-merge
+                const cached = getCachedAgeData(username);
+                if (cached) {
+                    // Re-merge: use existing results that are archived, plus new live data
+                    const archivedOnly = cached.results
+                        .filter(r => r._source === 'archived' || r._source === 'both')
+                        .map(r => { r._source = 'archived'; delete r._liveVersion; return r; });
+
+                    const mergedResults = mergeDataSources(archivedOnly, liveResults);
+                    const newAgeData = processResults(mergedResults, username);
+                    newAgeData._liveVersions = mergedResults._liveVersions || {};
+                    newAgeData._liveCount = liveResults.length;
+
+                    setCachedAgeData(username, newAgeData);
+                    updateButtonCacheForUser(username, newAgeData);
+
+                    // Refresh modal
+                    closeModalById(modal.dataset.modalId);
+                    showResultsModal(username, newAgeData);
+                }
+            } catch (error) {
+                console.error('Re-fetch live error:', error);
+                refetchLiveBtn.textContent = `Error: ${error.message}`;
+                setTimeout(() => {
+                    refetchLiveBtn.disabled = false;
+                    refetchLiveBtn.textContent = '🔄 Re-fetch Live';
+                }, 3000);
+            }
+        };
+    }
 
     // Age filter functionality with multi-select support
     let activeFilters = new Set(); // Track multiple active filters as "age-type" strings
@@ -9268,6 +9674,7 @@ function createTimelineEntry(point, idx, prevAge, trackedSubs) {
             </span>
             <span class="timeline-change">${changeText}</span>
             <span class="timeline-subreddit" style="${trackedStyle}"><a href="https://old.reddit.com/r/${point.subreddit}" target="_blank" style="color: var(--av-link);">r/${point.subreddit}</a></span>
+            ${point._source === 'live' || point._source === 'both' ? '<span class="timeline-live-badge">Live</span>' : ''}
         </div>
     `;
 
@@ -10808,8 +11215,48 @@ async function handleAgeCheck(username) {
     const loadingModalId = showLoadingModal(username);
 
     try {
-        const results = await searchUserAges(username);
-        const ageData = processResults(results, username);
+        // Fetch PushShift and Reddit live data in parallel
+        const loadingModal = resultsModals.find(m => m.modalId === loadingModalId);
+        const updateLoading = (msg) => {
+            if (loadingModal && loadingModal.modal) {
+                const loadingDiv = loadingModal.modal.querySelector('.age-loading');
+                if (loadingDiv) loadingDiv.textContent = msg;
+            }
+        };
+
+        let pushshiftResults = [];
+        let liveResults = [];
+        let pushshiftError = null;
+
+        // Always attempt PushShift
+        const pushshiftPromise = searchUserAges(username)
+            .then(r => { pushshiftResults = r; })
+            .catch(e => { pushshiftError = e; });
+
+        // Conditionally fetch live data
+        const livePromise = userSettings.enableLiveFetch
+            ? fetchRedditLiveData(username, updateLoading)
+                .then(r => { liveResults = r; })
+                .catch(e => { logDebug('Live fetch failed (non-blocking):', e.message); })
+            : Promise.resolve();
+
+        updateLoading('Searching PushShift + Reddit Live...');
+        await Promise.allSettled([pushshiftPromise, livePromise]);
+
+        // If PushShift failed and we have no live data either, throw
+        if (pushshiftError && liveResults.length === 0) {
+            throw pushshiftError;
+        }
+
+        // Merge data sources
+        const mergedResults = mergeDataSources(pushshiftResults, liveResults);
+        const ageData = processResults(mergedResults, username);
+
+        // Attach source metadata to ageData for UI use
+        ageData._liveVersions = mergedResults._liveVersions || {};
+        ageData._pushshiftCount = pushshiftResults.length;
+        ageData._liveCount = liveResults.length;
+        ageData._pushshiftError = pushshiftError ? pushshiftError.message : null;
 
         // Cache the results
         setCachedAgeData(username, ageData);
