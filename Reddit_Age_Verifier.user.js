@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.862
+// @version      1.864
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -1583,6 +1583,65 @@ function clearToken() {
     apiToken = null;
 }
 
+function storePendingAction(actionType, params = {}) {
+    GM_setValue('pendingAction', JSON.stringify({
+        type: actionType,
+        params: params,
+        timestamp: Date.now()
+    }));
+}
+
+function executePendingAction() {
+    const pendingStr = GM_getValue('pendingAction', null);
+    GM_setValue('pendingAction', null);
+
+    if (!pendingStr) return;
+
+    try {
+        const action = JSON.parse(pendingStr);
+
+        // Expire after 5 minutes
+        if (Date.now() - action.timestamp > 300000) return;
+
+        setTimeout(() => {
+            switch (action.type) {
+                case 'ageCheck':
+                    handleAgeCheck(action.params.username);
+                    break;
+                case 'deepAnalysis':
+                    handleDeepAnalysisQuick(action.params.username);
+                    break;
+                case 'postFrequency':
+                    showFrequencyModal(action.params.username);
+                    break;
+                case 'manualSearch':
+                    performManualSearch(action.params.searchParams).then(results => {
+                        showManualSearchResults(results);
+                    }).catch(err => {
+                        console.error('Pending manual search error:', err);
+                    });
+                    break;
+                case 'titleSearch':
+                    showManualSearchModal({
+                        subreddit: action.params.subreddit,
+                        searchType: 'submission',
+                        searchInput: action.params.title,
+                        autoExecute: true
+                    });
+                    break;
+                case 'restoreAll':
+                    restoreAll();
+                    break;
+                default:
+                    logDebug('Unknown pending action type:', action.type);
+            }
+        }, 100);
+    } catch (e) {
+        logDebug('Failed to parse pending action:', e);
+    }
+}
+
+
 function attemptAutoFetchToken() {
     logDebug("Age Verifier: Opening OAuth flow for auto-submission");
 
@@ -1885,13 +1944,8 @@ function handleCallbackTokenExtraction() {
     }
 }
 
-function showTokenModal(pendingUsername = null) {
+function showTokenModal() {
     if (tokenModal) return; // Already showing
-
-    // Store pending username for auto-resume after token capture
-    if (pendingUsername) {
-        GM_setValue('pendingAgeCheck', pendingUsername);
-    }
 
     const overlay = document.createElement('div');
     overlay.className = 'age-modal-overlay';
@@ -1971,13 +2025,7 @@ function showTokenModal(pendingUsername = null) {
         if (token) {
             saveToken(token);
             closeModal();
-
-            // If there was a pending username, automatically continue the age check
-            if (pendingUsername) {
-                handleAgeCheck(pendingUsername);
-            } else {
-                alert('Token saved successfully! You can now check user ages.');
-            }
+            executePendingAction();
         } else {
             alert('Please enter a valid token.');
         }
@@ -2002,21 +2050,12 @@ function showTokenModal(pendingUsername = null) {
             // Close the token modal
             closeModal();
 
-            // Get the pending username
-            const userToCheck = GM_getValue('pendingAgeCheck', null);
-            GM_setValue('pendingAgeCheck', null);
+            // Execute any pending action (age check, deep analysis, manual search, etc.)
+            executePendingAction();
 
-            // Check for pending restoration
+            // Check for pending restoration (separate system for DOM-based resume)
             const pendingRestorationStr = GM_getValue('pendingRestoration', null);
             GM_setValue('pendingRestoration', null);
-
-            // If there was a pending username, automatically continue the age check
-            if (userToCheck) {
-                logDebug("Age Verifier: Continuing with pending check for:", userToCheck);
-                setTimeout(() => {
-                    handleAgeCheck(userToCheck);
-                }, 100);
-            }
 
             // If there was a pending restoration, automatically continue
             if (pendingRestorationStr) {
@@ -5901,8 +5940,9 @@ async function showFrequencyModal(username) {
 
     // Check for token
     if (!apiToken) {
+        storePendingAction('postFrequency', { username });
         attemptAutoFetchToken();
-        showTokenModal(username);
+        showTokenModal();
         return;
     }
 
@@ -6680,7 +6720,9 @@ function performManualSearch(params) {
         loadToken();
 
         if (!apiToken) {
-            reject(new Error('No API token available'));
+            storePendingAction('manualSearch', { searchParams: params });
+            attemptAutoFetchToken();
+            showTokenModal();
             return;
         }
 
@@ -9796,6 +9838,7 @@ async function restoreAll() {
     loadToken();
 
     if (!apiToken) {
+        storePendingAction('restoreAll', {});
         showNotificationBanner('Fetching API token... Please authorize when prompted.', 4000);
         attemptAutoFetchToken();
         showTokenModal();
@@ -10755,8 +10798,9 @@ async function handleAgeCheck(username) {
 
     // Check if we have a token
     if (!apiToken) {
-        attemptAutoFetchToken(); // Always returns false, logs message
-        showTokenModal(username);
+        storePendingAction('ageCheck', { username });
+        attemptAutoFetchToken();
+        showTokenModal();
         return;
     }
 
@@ -10924,12 +10968,20 @@ function showContextMenu(event, username, buttonElement = null) {
                     if (buttonElement) {
                         const context = extractSubmissionContext(buttonElement);
                         if (context) {
-                            showManualSearchModal({
-                                subreddit: context.subreddit,
-                                searchType: 'submission',
-                                searchInput: context.title,
-                                autoExecute: true
-                            });
+                            // Pre-check token so title search can auto-resume after OAuth
+                            loadToken();
+                            if (!apiToken) {
+                                storePendingAction('titleSearch', { subreddit: context.subreddit, title: context.title });
+                                attemptAutoFetchToken();
+                                showTokenModal();
+                            } else {
+                                showManualSearchModal({
+                                    subreddit: context.subreddit,
+                                    searchType: 'submission',
+                                    searchInput: context.title,
+                                    autoExecute: true
+                                });
+                            }
                         } else {
                             alert('Could not extract submission title and subreddit. This feature only works on submission pages.');
                         }
@@ -10981,8 +11033,9 @@ async function handleDeepAnalysisQuick(username) {
 
         // Need to fetch data first
         if (!apiToken) {
+            storePendingAction('deepAnalysis', { username });
             attemptAutoFetchToken();
-            showTokenModal(username);
+            showTokenModal();
             return;
         }
 
