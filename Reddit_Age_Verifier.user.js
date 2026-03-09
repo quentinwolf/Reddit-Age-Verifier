@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.862
+// @version      1.863
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -6286,8 +6286,10 @@ function searchUserFrequencyPaginated(username, kind = 'comment', beforeTimestam
         // Re-check token from storage (in case another tab updated it)
         loadToken();
 
+        // Check for token
         if (!apiToken) {
-            reject(new Error('No API token available'));
+            attemptAutoFetchToken();
+            showTokenModal(username);
             return;
         }
 
@@ -6469,8 +6471,10 @@ function searchUserAgesWithPagination(username, beforeTimestamp = null, limit = 
         // Re-check token from storage (in case another tab updated it)
         loadToken();
 
+        // Check for token
         if (!apiToken) {
-            reject(new Error('No API token available'));
+            attemptAutoFetchToken();
+            showTokenModal(username);
             return;
         }
 
@@ -6679,8 +6683,10 @@ function performManualSearch(params) {
         // Re-check token from storage (in case another tab updated it)
         loadToken();
 
+        // Check for token
         if (!apiToken) {
-            reject(new Error('No API token available'));
+            attemptAutoFetchToken();
+            showTokenModal(username);
             return;
         }
 
@@ -10009,9 +10015,11 @@ async function fetchDeletedContent(thingId) {
         // Re-check token from storage (in case another tab updated it)
         loadToken();
 
+        // Check for token
         if (!apiToken) {
-            logDebug('No API token available for deleted author restoration');
-            return null;
+            attemptAutoFetchToken();
+            showTokenModal(username);
+            return;
         }
 
         const type = thingId.startsWith('t3_') ? 'submission' : 'comment';
