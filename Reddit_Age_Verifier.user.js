@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.866
+// @version      1.867
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -712,7 +712,7 @@ GM_addStyle(`
     }
 
     .freq-raw-table {
-        padding: 10px;
+        padding: 0px;
     }
 
     .freq-raw-cell {
@@ -724,18 +724,18 @@ GM_addStyle(`
     .freq-raw-delta {
         text-align: right;
         color: var(--av-text-muted);
-        min-width: 80px;
+        width: 70px;
     }
 
     .freq-raw-id {
         text-align: left;
-        min-width: 90px;
+        width: 70px;
     }
 
     .freq-raw-date {
         text-align: left;
         color: var(--av-text);
-        min-width: 170px;
+        width: 130px;
     }
 
     .freq-raw-sub {
@@ -753,9 +753,9 @@ GM_addStyle(`
 
     .freq-raw-table thead th {
         position: sticky;
-        top: 0;
+        top: -15px;
         background-color: var(--av-analysis-header);
-        padding: 6px 10px;
+        padding: 10px 15px;
     }
 
     .timeline-live-badge {
@@ -11722,25 +11722,49 @@ function processNewModmail() {
     if (isConversationView) {
         logDebug('[Modmail] Conversation view detected, scanning for subreddit...');
 
-        // Try every .subreddit span on the page
-        const allSubSpans = document.querySelectorAll('span.subreddit, [class*="subreddit"]');
-        logDebug('[Modmail] Subreddit spans found:', Array.from(allSubSpans).map(s => `"${s.textContent.trim()}" (class: ${s.className})`));
-
-        // Try any /r/ links in the header area
-        const allSubLinks = document.querySelectorAll('a[href*="/r/"]');
-        logDebug('[Modmail] /r/ links found:', Array.from(allSubLinks).slice(0, 5).map(a => a.href));
-
-        const subSpan = allSubSpans[0];
-        if (subSpan) {
-            const raw = subSpan.textContent.trim();
-            conversationSubreddit = raw.replace(/^(\/?(r\/))+/i, '').trim() || null;
-            logDebug('[Modmail] conversationSubreddit from span:', conversationSubreddit);
+        // Priority 1: modmail-thread-wrapper has subreddit-name as a DOM attribute
+        const threadWrapper = document.querySelector('modmail-thread-wrapper[subreddit-name]');
+        if (threadWrapper) {
+            conversationSubreddit = threadWrapper.getAttribute('subreddit-name') || null;
+            logDebug('[Modmail] conversationSubreddit from modmail-thread-wrapper:', conversationSubreddit);
         }
 
-        if (!conversationSubreddit && allSubLinks.length) {
-            const m = allSubLinks[0].href.match(/\/r\/([^/?#]+)/);
-            conversationSubreddit = m?.[1] || null;
-            logDebug('[Modmail] conversationSubreddit from link:', conversationSubreddit);
+        // Priority 2: modmail-action-bar-single also carries subreddit-name
+        if (!conversationSubreddit) {
+            const actionBar = document.querySelector('modmail-action-bar-single[subreddit-name]');
+            if (actionBar) {
+                conversationSubreddit = actionBar.getAttribute('subreddit-name') || null;
+                logDebug('[Modmail] conversationSubreddit from modmail-action-bar-single:', conversationSubreddit);
+            }
+        }
+
+        // Priority 3: /r/ links in the page header/breadcrumb, explicitly excluding the Contribution Overview table
+        if (!conversationSubreddit) {
+            const contribOverview = document.querySelector('table.border-collapse, table[class*="border-collapse"]');
+            const allSubLinks = Array.from(document.querySelectorAll('a[href*="/r/"]')).filter(a => {
+                return !contribOverview?.contains(a);
+            });
+            logDebug('[Modmail] /r/ links (excluding contrib overview):', allSubLinks.slice(0, 5).map(a => a.href));
+            if (allSubLinks.length) {
+                const m = allSubLinks[0].href.match(/\/r\/([^/?#]+)/);
+                conversationSubreddit = m?.[1] || null;
+                logDebug('[Modmail] conversationSubreddit from link:', conversationSubreddit);
+            }
+        }
+
+        // Priority 4: span fallback, also excluding Contribution Overview
+        if (!conversationSubreddit) {
+            const contribOverview = document.querySelector('table.border-collapse, table[class*="border-collapse"]');
+            const allSubSpans = Array.from(document.querySelectorAll('span.subreddit, [class*="subreddit"]')).filter(s => {
+                return !contribOverview?.contains(s);
+            });
+            logDebug('[Modmail] Subreddit spans (excluding contrib overview):', allSubSpans.map(s => `"${s.textContent.trim()}" (class: ${s.className})`));
+            const subSpan = allSubSpans[0];
+            if (subSpan) {
+                const raw = subSpan.textContent.trim();
+                conversationSubreddit = raw.replace(/^(\/?(r\/))+/i, '').trim() || null;
+                logDebug('[Modmail] conversationSubreddit from span:', conversationSubreddit);
+            }
         }
 
         // Debug: dump all user links and their nearest ancestors
