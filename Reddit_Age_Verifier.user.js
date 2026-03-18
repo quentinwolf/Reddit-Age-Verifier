@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.867
+// @version      1.868
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -8580,6 +8580,28 @@ function copyDeepAnalysisSectionAsMarkdown(sectionType, analysis, username) {
     return markdown;
 }
 
+function filterAgeDataForDeepAnalysis(ageData, includePosted, includePossible) {
+    const filteredResults = ageData.results.map(r => ({
+        ...r,
+        postedAges: includePosted ? r.postedAges : [],
+        possibleAges: includePossible ? r.possibleAges : []
+    })).filter(r => r.postedAges.length > 0 || r.possibleAges.length > 0);
+
+    const allPosted = new Set();
+    const allPossible = new Set();
+    filteredResults.forEach(r => {
+        r.postedAges.forEach(a => allPosted.add(a));
+        r.possibleAges.forEach(a => allPossible.add(a));
+    });
+
+    return {
+        ...ageData,
+        results: filteredResults,
+        postedAges: includePosted ? [...allPosted].sort((a, b) => a - b) : [],
+        possibleAges: includePossible ? [...allPossible].sort((a, b) => a - b) : []
+    };
+}
+
 function showDeepAnalysisModal(username, ageData, analysis) {
     // Update button cache since we're displaying this data
     updateButtonCacheForUser(username, ageData);
@@ -8597,14 +8619,21 @@ function showDeepAnalysisModal(username, ageData, analysis) {
     // Store analysis data for pagination
     modal.dataset.username = username;
 
+    // Filter state
+    let daFilters = { posted: true, possible: true };
+    let currentAnalysis = analysis;
+
+    function buildSectionsHTML(a) {
+        return buildOverviewSection(a) +
+               buildAnomaliesSection(a) +
+               buildBirthdaySection(a) +
+               buildCouplesSection(a) +
+               buildSubredditSection(a) +
+               buildTimelineSection(a);
+    }
+
     // Build section content
     const customButtonsHTML = renderCustomButtons(username, ageData);
-    const overviewHTML = buildOverviewSection(analysis);
-    const timelineHTML = buildTimelineSection(analysis);
-    const anomaliesHTML = buildAnomaliesSection(analysis);
-    const subredditHTML = buildSubredditSection(analysis);
-    const birthdayHTML = buildBirthdaySection(analysis);
-    const couplesHTML = buildCouplesSection(analysis);
 
     modal.innerHTML = `
         <div class="age-modal-header">
@@ -8618,12 +8647,14 @@ function showDeepAnalysisModal(username, ageData, analysis) {
         </div>
         <div class="age-modal-content">
             ${customButtonsHTML}
-            ${overviewHTML}
-            ${anomaliesHTML}
-            ${birthdayHTML}
-            ${couplesHTML}
-            ${subredditHTML}
-            ${timelineHTML}
+            <div class="da-filter-bar" style="display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--av-border);flex-shrink:0;margin-bottom:2px;">
+                <span style="font-size:12px;color:var(--av-text-muted);">Show:</span>
+                <button class="da-filter-btn active" data-filter="posted" style="padding:3px 11px;border-radius:12px;border:1px solid var(--av-success);background:var(--av-success);color:#fff;font-size:12px;cursor:pointer;">✓ Posted Ages</button>
+                <button class="da-filter-btn active" data-filter="possible" style="padding:3px 11px;border-radius:12px;border:1px solid var(--av-text-muted);background:var(--av-text-muted);color:#fff;font-size:12px;cursor:pointer;">~ Possible Ages</button>
+            </div>
+            <div class="da-sections-wrapper">
+                ${buildSectionsHTML(analysis)}
+            </div>
 
             <div class="fetch-more-container">
                 <div class="fetch-more-status">
@@ -8698,7 +8729,7 @@ function showDeepAnalysisModal(username, ageData, analysis) {
         btn.addEventListener('click', async (e) => {
             e.stopPropagation(); // Prevent header toggle
             const sectionType = btn.dataset.section;
-            const markdown = copyDeepAnalysisSectionAsMarkdown(sectionType, analysis, username);
+            const markdown = copyDeepAnalysisSectionAsMarkdown(sectionType, currentAnalysis, username);
 
             try {
                 await navigator.clipboard.writeText(markdown);
@@ -8719,6 +8750,57 @@ function showDeepAnalysisModal(username, ageData, analysis) {
                     btn.textContent = '📋';
                 }, 1500);
             }
+        });
+    });
+
+    // Deep Analysis age type filter toggles
+    modal.querySelectorAll('.da-filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const filter = btn.dataset.filter;
+            const isActive = btn.classList.contains('active');
+            const activeCount = modal.querySelectorAll('.da-filter-btn.active').length;
+
+            // Always keep at least one active
+            if (isActive && activeCount === 1) return;
+
+            daFilters[filter] = !isActive;
+            btn.classList.toggle('active', !isActive);
+
+            // Update button appearance
+            if (!isActive) {
+                btn.style.cssText = `padding:3px 11px;border-radius:12px;border:1px solid ${filter === 'posted' ? 'var(--av-success)' : 'var(--av-text-muted)'};background:${filter === 'posted' ? 'var(--av-success)' : 'var(--av-text-muted)'};color:#fff;font-size:12px;cursor:pointer;`;
+            } else {
+                const col = filter === 'posted' ? 'var(--av-success)' : 'var(--av-text-muted)';
+                btn.style.cssText = `padding:3px 11px;border-radius:12px;border:1px solid ${col};background:transparent;color:${col};font-size:12px;cursor:pointer;opacity:0.65;`;
+            }
+
+            // Re-filter ageData, re-run analysis, re-render sections
+            const filteredData = filterAgeDataForDeepAnalysis(ageData, daFilters.posted, daFilters.possible);
+            currentAnalysis = performDeepAnalysis(filteredData, username);
+
+            const wrapper = modal.querySelector('.da-sections-wrapper');
+            wrapper.innerHTML = buildSectionsHTML(currentAnalysis);
+
+            // Re-attach collapsible handlers
+            attachDeepAnalysisHandlers(modal, modalId, username);
+
+            // Re-attach copy button handlers
+            wrapper.querySelectorAll('.deep-analysis-copy').forEach(copyBtn => {
+                copyBtn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    const md = copyDeepAnalysisSectionAsMarkdown(copyBtn.dataset.section, currentAnalysis, username);
+                    try {
+                        await navigator.clipboard.writeText(md);
+                        const orig = copyBtn.textContent;
+                        copyBtn.textContent = '✓';
+                        copyBtn.classList.add('copied');
+                        setTimeout(() => { copyBtn.textContent = orig; copyBtn.classList.remove('copied'); }, 1500);
+                    } catch (err) {
+                        copyBtn.textContent = '✗';
+                        setTimeout(() => { copyBtn.textContent = '📋'; }, 1500);
+                    }
+                });
+            });
         });
     });
 
