@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.868
+// @version      1.869
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -134,6 +134,7 @@ const DEFAULT_SETTINGS = {
     },
     enableLiveFetch: true, // Auto-fetch live Reddit data alongside PushShift
     liveFetchMaxPages: 10, // Max pages to iterate (100 items each, Reddit caps at ~1000)
+    livePageDelay: 100, // Delay in ms between page fetches (lower = faster, higher = safer)
     customButtons: [
         // Example: { id: 'clickme', label: 'Clickable Button', type: 'link', urlTemplate: 'https://someurl.here', enabled: true, style: 'danger', showInContextMenu: false }
         // Example: { id: 'verify', label: 'Verification', type: 'template', textTemplate: 'Your text here with {{author}}', enabled: true, style: 'primary', showInContextMenu: true }
@@ -2906,6 +2907,15 @@ function showSettingsModal() {
                 </span>
 
                 <div class="age-settings-row">
+                    <label class="age-settings-label">Live Fetch Page Delay (ms)</label>
+                    <input type="number" class="age-settings-numberinput" id="setting-live-page-delay"
+                           value="${userSettings.livePageDelay ?? 100}" min="0" max="2000">
+                </div>
+                <span class="age-settings-help-text" style="display: block; margin-top: -8px; margin-bottom: 12px;">
+                    Delay between page fetches. Submissions &amp; comments fetch in parallel. 0 = no delay, 250+ = conservative.
+                </span>
+
+                <div class="age-settings-row">
                     <label class="age-settings-label">Restore All: Concurrent Workers</label>
                     <input type="number" class="age-settings-numberinput" id="setting-restore-workers"
                            value="${userSettings.restoreAllWorkers}" min="1" max="5">
@@ -3183,6 +3193,7 @@ function showSettingsModal() {
             autoRestoreDeletedAuthors: modal.querySelector('#autoRestoreDeletedAuthors').checked,
             enableLiveFetch: modal.querySelector('#setting-enable-live-fetch').checked,
             liveFetchMaxPages: parseInt(modal.querySelector('#setting-live-max-pages').value) || 10,
+            livePageDelay: parseInt(modal.querySelector('#setting-live-page-delay').value) ?? 100,
             minCouplesAgeGap: minCouplesGapValidated,
             timelineContextPosts: timelineContextValidated,
             timelineCompressionThreshold: timelineThresholdValidated,
@@ -3894,9 +3905,10 @@ async function fetchAllRedditLivePages(username, kind = 'submitted', onProgress 
         if (!result.after || result.children.length === 0) break;
         afterToken = result.after;
 
-        // Small delay to be respectful
-        if (page < maxPages - 1 && result.after) {
-            await new Promise(r => setTimeout(r, 250));
+        // Small delay to be respectful of Reddit's rate limits
+        const delay = userSettings.livePageDelay ?? 100;
+        if (page < maxPages - 1 && result.after && delay > 0) {
+            await new Promise(r => setTimeout(r, delay));
         }
     }
 
@@ -3911,22 +3923,39 @@ async function fetchAllRedditLivePages(username, kind = 'submitted', onProgress 
  * @returns {Promise<Array>} all normalized items
  */
 async function fetchRedditLiveData(username, onProgress = null) {
-    const updateStatus = (msg) => { if (onProgress) onProgress(msg); };
+    const submissionsStatus = { page: 0, total: 0 };
+    const commentsStatus = { page: 0, total: 0 };
 
-    updateStatus('Fetching live submissions...');
-    const submissions = await fetchAllRedditLivePages(username, 'submitted', (page, total) => {
-        updateStatus(`Live submissions: page ${page}, ${total} items...`);
-    });
+    const updateStatus = () => {
+        if (onProgress) {
+            onProgress(
+                `Live fetch:<br>` +
+                `&nbsp;Submissions: pg ${submissionsStatus.page} (${submissionsStatus.total} items)<br>` +
+                `&nbsp;Comments: pg ${commentsStatus.page} (${commentsStatus.total} items)<br>`
+            );
+        }
+    };
 
-    updateStatus('Fetching live comments...');
-    const comments = await fetchAllRedditLivePages(username, 'comments', (page, total) => {
-        updateStatus(`Live comments: page ${page}, ${total} items...`);
-    });
+    if (onProgress) onProgress('Fetching live submissions &amp; comments in parallel...');
+
+    const [submissions, comments] = await Promise.all([
+        fetchAllRedditLivePages(username, 'submitted', (page, total) => {
+            submissionsStatus.page = page;
+            submissionsStatus.total = total;
+            updateStatus();
+        }),
+        fetchAllRedditLivePages(username, 'comments', (page, total) => {
+            commentsStatus.page = page;
+            commentsStatus.total = total;
+            updateStatus();
+        })
+    ]);
 
     const combined = [...submissions, ...comments];
     logDebug(`Reddit live total: ${combined.length} items (${submissions.length} submissions, ${comments.length} comments)`);
     return combined;
 }
+
 
 /**
  * Merge PushShift (archived) and Reddit live data, deduplicating by post ID.
@@ -11302,7 +11331,7 @@ async function handleAgeCheck(username) {
         const updateLoading = (msg) => {
             if (loadingModal && loadingModal.modal) {
                 const loadingDiv = loadingModal.modal.querySelector('.age-loading');
-                if (loadingDiv) loadingDiv.textContent = msg;
+                if (loadingDiv) loadingDiv.innerHTML = msg;
             }
         };
 
