@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.869
+// @version      1.870
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -335,6 +335,7 @@ let tokenModal = null;
 let resultsModals = []; // Array to track multiple result modals
 let modalCounter = 0;   // Counter for unique modal IDs
 let zIndexCounter = 10000; // Counter for z-index management
+let avShadowRoot = null; // Shadow DOM root for style isolation
 
 let oauthFlowTimestamp = 0; // Track when we initiated OAuth flow
 const OAUTH_FLOW_TIMEOUT = 60 * 1000; // 60 seconds
@@ -347,7 +348,7 @@ const USERNOTES_CACHE_TTL = 20 * 1000; // 20 seconds for testint
 // STYLES
 // ============================================================================
 
-GM_addStyle(`
+const AV_STYLES = `
     /* Targeted CSS isolation - only reset problematic inherited properties */
     .age-modal,
     .age-modal * {
@@ -1570,7 +1571,23 @@ GM_addStyle(`
     .av-newmodmail-toolbar .tb-bracket-button::before { content: '[' !important; }
     .av-newmodmail-toolbar .tb-bracket-button::after { content: ']' !important; }
 
-`);
+`;
+GM_addStyle(AV_STYLES);
+
+// ============================================================================
+// SHADOW DOM INITIALIZATION (style isolation from Reddit page styles)
+// ============================================================================
+
+(function initShadowDOM() {
+    const host = document.createElement('div');
+    host.id = 'av-shadow-host';
+    document.body.appendChild(host);
+    avShadowRoot = host.attachShadow({ mode: 'open' });
+
+    const style = document.createElement('style');
+    style.textContent = AV_STYLES;
+    avShadowRoot.appendChild(style);
+})();
 
 // Debug Function to log messages to console if enabled at top of script
 function logDebug(...args) {
@@ -1581,7 +1598,7 @@ function logDebug(...args) {
 
 // Function to show floating notification banner
 function showNotificationBanner(message, duration = 3000, update = false) {
-    const existingBanner = document.querySelector('.settings-notification-banner');
+    const existingBanner = avShadowRoot.querySelector('.settings-notification-banner');
 
     if (update && existingBanner) {
         // Update existing banner text
@@ -1624,7 +1641,7 @@ function showNotificationBanner(message, duration = 3000, update = false) {
         <span>${message}</span>
     `;
 
-    document.body.appendChild(banner);
+    avShadowRoot.appendChild(banner);
 
     // Trigger show animation
     requestAnimationFrame(() => {
@@ -2072,8 +2089,8 @@ function showTokenModal() {
         </div>
     `;
 
-    document.body.appendChild(overlay);
-    document.body.appendChild(modal);
+    avShadowRoot.appendChild(overlay);
+    avShadowRoot.appendChild(modal);
 
     tokenModal = { modal, overlay };
 
@@ -2102,8 +2119,8 @@ function showTokenModal() {
     modalContent.appendChild(autoFetchBtn);
 
     const closeModal = () => {
-        document.body.removeChild(overlay);
-        document.body.removeChild(modal);
+        avShadowRoot.removeChild(overlay);
+        avShadowRoot.removeChild(modal);
         tokenModal = null;
     };
 
@@ -2244,7 +2261,7 @@ function showIgnoredUsersModal() {
         </div>
     `;
 
-    document.body.appendChild(modal);
+    avShadowRoot.appendChild(modal);
 
     makeDraggable(modal);
     modal.addEventListener('mousedown', () => {
@@ -2259,7 +2276,7 @@ function showIgnoredUsersModal() {
     const settingsBtn = modal.querySelector('#open-full-settings');
 
     const closeModal = () => {
-        document.body.removeChild(modal);
+        avShadowRoot.removeChild(modal);
         resultsModals = resultsModals.filter(m => m.modalId !== modalId);
     };
 
@@ -2438,7 +2455,7 @@ function showTrackedSubredditsModal() {
         </div>
     `;
 
-    document.body.appendChild(modal);
+    avShadowRoot.appendChild(modal);
 
     makeDraggable(modal);
     modal.addEventListener('mousedown', () => {
@@ -2453,7 +2470,7 @@ function showTrackedSubredditsModal() {
     const settingsBtn = modal.querySelector('#open-full-settings-subs');
 
     const closeModal = () => {
-        document.body.removeChild(modal);
+        avShadowRoot.removeChild(modal);
         resultsModals = resultsModals.filter(m => m.modalId !== modalId);
     };
 
@@ -3104,7 +3121,7 @@ function showSettingsModal() {
         </div>
     `;
 
-    document.body.appendChild(modal);
+    avShadowRoot.appendChild(modal);
 
     makeDraggable(modal);
     modal.addEventListener('mousedown', () => {
@@ -3125,7 +3142,7 @@ function showSettingsModal() {
     const addUsersBtn = modal.querySelector('#add-ignored-users');
 
     const closeModal = () => {
-        document.body.removeChild(modal);
+        avShadowRoot.removeChild(modal);
         resultsModals = resultsModals.filter(m => m.modalId !== modalId);
     };
 
@@ -6348,7 +6365,7 @@ async function showFrequencyModal(username) {
         </div>
     `;
 
-    document.body.appendChild(modal);
+    avShadowRoot.appendChild(modal);
 
     makeDraggable(modal);
     modal.addEventListener('mousedown', () => {
@@ -6363,7 +6380,7 @@ async function showFrequencyModal(username) {
     const fetchMoreBtn = modal.querySelector('#freq-fetch-more');
 
     const closeModal = () => {
-        document.body.removeChild(modal);
+        avShadowRoot.removeChild(modal);
         resultsModals = resultsModals.filter(m => m.modalId !== modalId);
     };
 
@@ -6570,7 +6587,7 @@ function showSubredditFilteredModal(username, subreddit, allItems, kind, parentM
         </div>
     `;
 
-    document.body.appendChild(modal);
+    avShadowRoot.appendChild(modal);
 
     makeDraggable(modal);
     modal.addEventListener('mousedown', () => {
@@ -6585,7 +6602,7 @@ function showSubredditFilteredModal(username, subreddit, allItems, kind, parentM
     const sortButton = modal.querySelector('#subreddit-toggle-sort');
 
     const closeModal = () => {
-        document.body.removeChild(modal);
+        avShadowRoot.removeChild(modal);
         resultsModals = resultsModals.filter(m => m.modalId !== modalId);
     };
 
@@ -7392,7 +7409,7 @@ function showManualSearchModal(options = {}) {
         </div>
     `;
 
-    document.body.appendChild(modal);
+    avShadowRoot.appendChild(modal);
 
     makeDraggable(modal);
     modal.addEventListener('mousedown', () => {
@@ -7408,7 +7425,7 @@ function showManualSearchModal(options = {}) {
     const form = modal.querySelector('#manual-search-form');
 
     const closeModal = () => {
-        document.body.removeChild(modal);
+        avShadowRoot.removeChild(modal);
         resultsModals = resultsModals.filter(m => m.modalId !== modalId);
     };
 
@@ -7652,7 +7669,7 @@ function showManualSearchResults(searchData) {
         </div>
     `;
 
-    document.body.appendChild(modal);
+    avShadowRoot.appendChild(modal);
 
     makeDraggable(modal);
     modal.addEventListener('mousedown', () => {
@@ -7668,7 +7685,7 @@ function showManualSearchResults(searchData) {
     const form = modal.querySelector('#manual-search-form-results');
 
     const closeModal = () => {
-        document.body.removeChild(modal);
+        avShadowRoot.removeChild(modal);
         resultsModals = resultsModals.filter(m => m.modalId !== modalId);
     };
 
@@ -7977,7 +7994,7 @@ function showResultsModal(username, ageData) {
 
     // Don't append overlay - we don't want darkening with multiple modals
     // document.body.appendChild(overlay);
-    document.body.appendChild(modal);
+    avShadowRoot.appendChild(modal);
 
     // Make modal draggable
     makeDraggable(modal);
@@ -8015,7 +8032,7 @@ function showResultsModal(username, ageData) {
     const closeModal = () => {
         // Don't try to remove overlay since we didn't append it
         // document.body.removeChild(overlay);
-        document.body.removeChild(modal);
+        avShadowRoot.removeChild(modal);
         // Remove from tracking array
         resultsModals = resultsModals.filter(m => m.modalId !== modalId);
     };
@@ -8371,7 +8388,7 @@ function showErrorModal(username, error) {
 
     // Don't append overlay
     // document.body.appendChild(overlay);
-    document.body.appendChild(modal);
+    avShadowRoot.appendChild(modal);
 
     makeDraggable(modal);
     modal.addEventListener('mousedown', (e) => {
@@ -8388,7 +8405,7 @@ function showErrorModal(username, error) {
 
     const closeModal = () => {
         // document.body.removeChild(overlay);
-        document.body.removeChild(modal);
+        avShadowRoot.removeChild(modal);
         resultsModals = resultsModals.filter(m => m.modalId !== modalId);
     };
 
@@ -8700,7 +8717,7 @@ function showDeepAnalysisModal(username, ageData, analysis) {
         </div>
     `;
 
-    document.body.appendChild(modal);
+    avShadowRoot.appendChild(modal);
 
     makeDraggable(modal);
     modal.addEventListener('mousedown', () => {
@@ -8720,7 +8737,7 @@ function showDeepAnalysisModal(username, ageData, analysis) {
     const fetchMoreBtn = modal.querySelector('#fetch-more-data');
 
     const closeModal = () => {
-        document.body.removeChild(modal);
+        avShadowRoot.removeChild(modal);
         resultsModals = resultsModals.filter(m => m.modalId !== modalId);
     };
 
@@ -10303,7 +10320,7 @@ function injectRestoreButton(authorElement, thingId, cachedUsername) {
 // Show context menu for restore button
 function showRestoreContextMenu(event, button) {
     // Remove any existing context menu
-    const existingMenu = document.getElementById('restore-context-menu');
+    const existingMenu = avShadowRoot.querySelector('#restore-context-menu');
     if (existingMenu) {
         existingMenu.remove();
     }
@@ -10338,7 +10355,7 @@ function showRestoreContextMenu(event, button) {
     };
 
     menu.appendChild(restoreAllOption);
-    document.body.appendChild(menu);
+    avShadowRoot.appendChild(menu);
 
     // Close menu when clicking elsewhere
     setTimeout(() => {
@@ -11283,7 +11300,7 @@ function showLoadingModal(username) {
 
     // Don't append overlay
     // document.body.appendChild(overlay);
-    document.body.appendChild(modal);
+    avShadowRoot.appendChild(modal);
 
     makeDraggable(modal);
     modal.addEventListener('mousedown', (e) => {
@@ -11481,7 +11498,7 @@ function showContextMenu(event, username, buttonElement = null) {
         </div>
     `;
 
-    document.body.appendChild(menu);
+    avShadowRoot.appendChild(menu);
     activeContextMenu = menu;
 
     // Adjust position if menu would go off-screen
@@ -12382,7 +12399,7 @@ async function showUsernotesModal(username, subreddit, threadUrl = null) {
         </div>
     `;
 
-    document.body.appendChild(modal);
+    avShadowRoot.appendChild(modal);
     makeDraggable(modal);
 
     const closeBtn = modal.querySelector('.age-modal-close');
