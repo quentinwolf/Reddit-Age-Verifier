@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.873
+// @version      1.874
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -609,14 +609,15 @@ const AV_STYLES = `
 
     .age-summary {
         background-color: var(--av-surface);
-        padding: 15px;
+        padding: 0 5px 5px 15px;
         border-radius: 4px;
-        margin-bottom: 15px;
+        margin-bottom: 5px;
         border-left: 4px solid var(--av-primary);
     }
 
     .age-summary-title {
-        margin-bottom: 4px;
+        padding-top: 0px;
+        margin-bottom: 0px;
         color: var(--av-text);
         display: flex;
         justify-content: space-between;
