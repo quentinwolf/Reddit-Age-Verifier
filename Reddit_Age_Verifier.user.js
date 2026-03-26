@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.872
+// @version      1.873
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -115,6 +115,7 @@ const DEFAULT_SETTINGS = {
     autoRestoreDeletedAuthors: false,  // Future: auto-restore on page load if cached
     modalWidth: 800, // default results modal width in pixels
     modalHeight: 900, // default results modal height in pixels
+    modalZoom: 1, // zoom level for all modals (0.8 - 1.5)
     paginationLimit: 250,
     trackedSubreddits: [], // subreddits to compare age behavior against
     minPotentialAge: 25,
@@ -254,6 +255,12 @@ function applyTheme() {
     document.documentElement.style.setProperty('--av-link', colors.link);
     document.documentElement.style.setProperty('--av-button-default', userSettings.buttonDefaultColor);
     document.documentElement.style.setProperty('--av-button-cached', userSettings.buttonCachedColor);
+    document.documentElement.style.setProperty('--av-modal-zoom', userSettings.modalZoom || 1);
+
+    // After zoom changes, clamp all open modals to fit the viewport
+    if (typeof clampAllModalsToViewport === 'function') {
+        setTimeout(clampAllModalsToViewport, 50); // Brief delay for zoom CSS to apply
+    }
 }
 
 // Extract version from userscript metadata
@@ -460,7 +467,7 @@ const AV_STYLES = `
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
         font-size: 14px !important;
         line-height: 1.5 !important;
-        zoom: 1 !important;
+        zoom: var(--av-modal-zoom, 1) !important;
         -webkit-text-size-adjust: 100% !important;
     }
 
@@ -921,8 +928,33 @@ const AV_STYLES = `
 
     /* Resizable modal */
     .age-modal.resizable {
-        resize: both;
         overflow: hidden;
+    }
+
+    .age-modal-resize-handle {
+        position: absolute;
+        bottom: 0;
+        right: 0;
+        width: 18px;
+        height: 18px;
+        cursor: nwse-resize;
+        z-index: 10;
+    }
+
+    .age-modal-resize-handle::after {
+        content: '';
+        position: absolute;
+        bottom: 4px;
+        right: 4px;
+        width: 10px;
+        height: 10px;
+        border-right: 2px solid var(--av-text-muted);
+        border-bottom: 2px solid var(--av-text-muted);
+        opacity: 0.5;
+    }
+
+    .age-modal-resize-handle:hover::after {
+        opacity: 1;
     }
 
     .highlight-age {
@@ -2366,6 +2398,7 @@ function showIgnoredUsersModal() {
     avShadowRoot.appendChild(modal);
 
     makeDraggable(modal);
+    makeResizable(modal);
     modal.addEventListener('mousedown', () => {
         bringToFront(modal);
         normalizeModalPosition(modal);
@@ -2560,6 +2593,7 @@ function showTrackedSubredditsModal() {
     avShadowRoot.appendChild(modal);
 
     makeDraggable(modal);
+    makeResizable(modal);
     modal.addEventListener('mousedown', () => {
         bringToFront(modal);
         normalizeModalPosition(modal);
@@ -3096,6 +3130,24 @@ function showSettingsModal() {
                     <input type="number" class="age-settings-numberinput" id="setting-modal-height"
                            value="${userSettings.modalHeight}" min="300" max="2000">
                 </div>
+
+                <div class="age-settings-row">
+                    <label class="age-settings-label">Modal Zoom Level</label>
+                    <select class="age-settings-input" id="setting-modal-zoom" style="width: 120px;">
+                        <option value="0.8" ${userSettings.modalZoom === 0.8 ? 'selected' : ''}>80%</option>
+                        <option value="0.85" ${userSettings.modalZoom === 0.85 ? 'selected' : ''}>85%</option>
+                        <option value="0.9" ${userSettings.modalZoom === 0.9 ? 'selected' : ''}>90%</option>
+                        <option value="0.95" ${userSettings.modalZoom === 0.95 ? 'selected' : ''}>95%</option>
+                        <option value="1" ${userSettings.modalZoom === 1 || !userSettings.modalZoom ? 'selected' : ''}>100% (Default)</option>
+                        <option value="1.1" ${userSettings.modalZoom === 1.1 ? 'selected' : ''}>110%</option>
+                        <option value="1.25" ${userSettings.modalZoom === 1.25 ? 'selected' : ''}>125%</option>
+                        <option value="1.4" ${userSettings.modalZoom === 1.4 ? 'selected' : ''}>140%</option>
+                        <option value="1.5" ${userSettings.modalZoom === 1.5 ? 'selected' : ''}>150%</option>
+                    </select>
+                </div>
+                <span class="age-settings-help-text" style="display: block; margin-top: -8px; margin-bottom: 12px;">
+                    Scales all modal content. Useful for accessibility or smaller screens.
+                </span>
             </div>
 
             <!-- Tracked Subreddits -->
@@ -3226,6 +3278,7 @@ function showSettingsModal() {
     avShadowRoot.appendChild(modal);
 
     makeDraggable(modal);
+    makeResizable(modal);
     modal.addEventListener('mousedown', () => {
         bringToFront(modal);
         normalizeModalPosition(modal);
@@ -3301,6 +3354,7 @@ function showSettingsModal() {
             cacheExpiration: parseInt(modal.querySelector('#setting-cache-days').value),
             modalWidth: parseInt(modal.querySelector('#setting-modal-width').value),
             modalHeight: parseInt(modal.querySelector('#setting-modal-height').value),
+            modalZoom: parseFloat(modal.querySelector('#setting-modal-zoom').value) || 1,
             paginationLimit: parseInt(modal.querySelector('#setting-pagination-limit').value),
             minPotentialAge: parseInt(modal.querySelector('#setting-min-potential-age').value),
             showAgeEstimation: modal.querySelector('#setting-show-estimation').checked,
@@ -6470,6 +6524,7 @@ async function showFrequencyModal(username) {
     avShadowRoot.appendChild(modal);
 
     makeDraggable(modal);
+    makeResizable(modal);
     modal.addEventListener('mousedown', () => {
         bringToFront(modal);
         normalizeModalPosition(modal);
@@ -6692,6 +6747,7 @@ function showSubredditFilteredModal(username, subreddit, allItems, kind, parentM
     avShadowRoot.appendChild(modal);
 
     makeDraggable(modal);
+    makeResizable(modal);
     modal.addEventListener('mousedown', () => {
         bringToFront(modal);
         normalizeModalPosition(modal);
@@ -7140,10 +7196,85 @@ function normalizeModalPosition(modal) {
     const transform = window.getComputedStyle(modal).transform;
     if (transform && transform !== 'none') {
         const rect = modal.getBoundingClientRect();
-        modal.style.left = `${rect.left}px`;
-        modal.style.top = `${rect.top}px`;
+        const zoom = parseFloat(getComputedStyle(modal).zoom) || 1;
+        modal.style.left = `${rect.left / zoom}px`;
+        modal.style.top = `${rect.top / zoom}px`;
         modal.style.transform = 'none';
     }
+}
+
+// Clamp modal position so it stays within the viewport
+function clampModalToViewport(modal) {
+    const zoom = parseFloat(getComputedStyle(modal).zoom) || 1;
+    const rect = modal.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    let left = parseFloat(modal.style.left);
+    let top = parseFloat(modal.style.top);
+    if (isNaN(left) || isNaN(top)) return;
+
+    // Ensure at least 50px of the title bar stays visible on each edge
+    const minVisible = 50;
+    const visualRight = rect.left + rect.width;
+    const visualBottom = rect.top + rect.height;
+
+    // Don't let the left edge go too far right
+    if (rect.left > vw - minVisible) {
+        left = (vw - minVisible) / zoom;
+    }
+    // Don't let the right edge go too far left
+    if (visualRight < minVisible) {
+        left = (minVisible - rect.width) / zoom;
+    }
+    // Don't let the top go below the viewport
+    if (rect.top > vh - minVisible) {
+        top = (vh - minVisible) / zoom;
+    }
+    // Don't let it go above the viewport
+    if (rect.top < 0) {
+        top = 0;
+    }
+
+    modal.style.left = left + 'px';
+    modal.style.top = top + 'px';
+}
+
+// Shrink modal dimensions if they overflow the viewport at the current zoom
+function clampModalSizeToViewport(modal) {
+    const zoom = parseFloat(getComputedStyle(modal).zoom) || 1;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    const minW = parseFloat(getComputedStyle(modal).minWidth) || 400;
+    const minH = parseFloat(getComputedStyle(modal).minHeight) || 300;
+
+    // Maximum CSS dimensions that fit the viewport at this zoom
+    const maxW = Math.max(minW, (vw * 0.95) / zoom);
+    const maxH = Math.max(minH, (vh * 0.95) / zoom);
+
+    const currentW = modal.offsetWidth;
+    const currentH = modal.offsetHeight;
+
+    if (currentW > maxW) {
+        modal.style.width = maxW + 'px';
+    }
+    if (currentH > maxH) {
+        modal.style.height = maxH + 'px';
+    }
+
+    // Also ensure position is clamped after resizing
+    normalizeModalPosition(modal);
+    clampModalToViewport(modal);
+}
+
+// Clamp all open modals to fit within the viewport
+function clampAllModalsToViewport() {
+    resultsModals.forEach(({ modal }) => {
+        if (modal && modal.parentNode) {
+            clampModalSizeToViewport(modal);
+        }
+    });
 }
 
 function makeDraggable(modal) {
@@ -7163,9 +7294,9 @@ function makeDraggable(modal) {
         normalizeModalPosition(modal);
 
         // Get current position after potential normalization
-        const rect = modal.getBoundingClientRect();
-        modalStartLeft = rect.left;
-        modalStartTop = rect.top;
+        // Use parsed CSS left/top (in pre-zoom space) for consistent positioning
+        modalStartLeft = parseFloat(modal.style.left) || 0;
+        modalStartTop = parseFloat(modal.style.top) || 0;
 
         // Record starting mouse position
         startX = e.clientX;
@@ -7181,13 +7312,20 @@ function makeDraggable(modal) {
         if (isDragging) {
             e.preventDefault();
 
+            // Account for CSS zoom: mouse deltas are in unzoomed coords,
+            // but element position is in zoomed coords
+            const zoom = parseFloat(getComputedStyle(modal).zoom) || 1;
+
             // Calculate how far the mouse has moved
-            const deltaX = e.clientX - startX;
-            const deltaY = e.clientY - startY;
+            const deltaX = (e.clientX - startX) / zoom;
+            const deltaY = (e.clientY - startY) / zoom;
 
             // Set new position
             modal.style.left = (modalStartLeft + deltaX) + 'px';
             modal.style.top = (modalStartTop + deltaY) + 'px';
+
+            // Clamp to viewport
+            clampModalToViewport(modal);
         }
     }
 
@@ -7195,6 +7333,67 @@ function makeDraggable(modal) {
         isDragging = false;
         document.removeEventListener('mousemove', drag);
         document.removeEventListener('mouseup', dragEnd);
+    }
+}
+
+// Custom resize handler that accounts for CSS zoom
+function makeResizable(modal) {
+    if (!modal.classList.contains('resizable')) return;
+
+    const handle = document.createElement('div');
+    handle.className = 'age-modal-resize-handle';
+    modal.appendChild(handle);
+
+    let isResizing = false;
+    let startX, startY;
+    let startWidth, startHeight;
+
+    handle.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        normalizeModalPosition(modal);
+
+        const zoom = parseFloat(getComputedStyle(modal).zoom) || 1;
+        startX = e.clientX;
+        startY = e.clientY;
+        startWidth = modal.offsetWidth;
+        startHeight = modal.offsetHeight;
+        isResizing = true;
+
+        document.addEventListener('mousemove', onResize);
+        document.addEventListener('mouseup', stopResize);
+    });
+
+    function onResize(e) {
+        if (!isResizing) return;
+        e.preventDefault();
+
+        const zoom = parseFloat(getComputedStyle(modal).zoom) || 1;
+        const deltaX = (e.clientX - startX) / zoom;
+        const deltaY = (e.clientY - startY) / zoom;
+
+        const minW = parseFloat(getComputedStyle(modal).minWidth) || 400;
+        const minH = parseFloat(getComputedStyle(modal).minHeight) || 300;
+
+        let newWidth = Math.max(minW, startWidth + deltaX);
+        let newHeight = Math.max(minH, startHeight + deltaY);
+
+        // Clamp so the modal doesn't extend beyond the viewport
+        const rect = modal.getBoundingClientRect();
+        const maxWidth = (window.innerWidth - rect.left) / zoom;
+        const maxHeight = (window.innerHeight - rect.top) / zoom;
+        newWidth = Math.min(newWidth, maxWidth);
+        newHeight = Math.min(newHeight, maxHeight);
+
+        modal.style.width = newWidth + 'px';
+        modal.style.height = newHeight + 'px';
+    }
+
+    function stopResize() {
+        isResizing = false;
+        document.removeEventListener('mousemove', onResize);
+        document.removeEventListener('mouseup', stopResize);
     }
 }
 
@@ -7514,6 +7713,7 @@ function showManualSearchModal(options = {}) {
     avShadowRoot.appendChild(modal);
 
     makeDraggable(modal);
+    makeResizable(modal);
     modal.addEventListener('mousedown', () => {
         bringToFront(modal);
         normalizeModalPosition(modal);
@@ -7774,6 +7974,7 @@ function showManualSearchResults(searchData) {
     avShadowRoot.appendChild(modal);
 
     makeDraggable(modal);
+    makeResizable(modal);
     modal.addEventListener('mousedown', () => {
         bringToFront(modal);
         normalizeModalPosition(modal);
@@ -8107,6 +8308,7 @@ function showResultsModal(username, ageData) {
 
     // Make modal draggable
     makeDraggable(modal);
+    makeResizable(modal);
 
     // Add click-to-focus functionality and ensure transform is removed for proper resizing
     modal.addEventListener('mousedown', (e) => {
@@ -8513,6 +8715,7 @@ function showErrorModal(username, error) {
     avShadowRoot.appendChild(modal);
 
     makeDraggable(modal);
+    makeResizable(modal);
     modal.addEventListener('mousedown', (e) => {
         bringToFront(modal);
 
@@ -8842,6 +9045,7 @@ function showDeepAnalysisModal(username, ageData, analysis) {
     avShadowRoot.appendChild(modal);
 
     makeDraggable(modal);
+    makeResizable(modal);
     modal.addEventListener('mousedown', () => {
         bringToFront(modal);
         normalizeModalPosition(modal);
@@ -11425,6 +11629,7 @@ function showLoadingModal(username) {
     avShadowRoot.appendChild(modal);
 
     makeDraggable(modal);
+    makeResizable(modal);
     modal.addEventListener('mousedown', (e) => {
         bringToFront(modal);
 
@@ -12523,6 +12728,7 @@ async function showUsernotesModal(username, subreddit, threadUrl = null) {
 
     avShadowRoot.appendChild(modal);
     makeDraggable(modal);
+    makeResizable(modal);
 
     const closeBtn = modal.querySelector('.age-modal-close');
     closeBtn.onclick = () => { modal.remove(); resultsModals = resultsModals.filter(m => m.modalId !== modalId); };
