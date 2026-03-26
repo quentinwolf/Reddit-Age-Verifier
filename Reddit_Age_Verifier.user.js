@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.874
+// @version      1.875
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -652,7 +652,7 @@ const AV_STYLES = `
     .age-chips-columns {
         display: flex;
         gap: 16px;
-        margin-top: 10px;
+        margin-top: 5px;
     }
 
     .age-chips-column {
@@ -664,7 +664,7 @@ const AV_STYLES = `
         display: flex;
         flex-wrap: wrap;
         gap: 8px;
-        margin-top: 10px;
+        margin-top: 5px;
     }
 
     .age-chip {
@@ -716,7 +716,7 @@ const AV_STYLES = `
     }
 
     .age-filter-status-container {
-        margin-top: 10px;
+        margin-top: 5px;
     }
 
     .age-filter-status {
@@ -724,7 +724,7 @@ const AV_STYLES = `
         color: white;
         padding: 8px 12px;
         border-radius: 4px;
-        margin-bottom: 10px;
+        margin-bottom: 5px;
         cursor: pointer;
         font-size: 13px;
     }
