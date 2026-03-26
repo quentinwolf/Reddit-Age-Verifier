@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.870
+// @version      1.872
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -349,6 +349,22 @@ const USERNOTES_CACHE_TTL = 20 * 1000; // 20 seconds for testint
 // ============================================================================
 
 const AV_STYLES = `
+    /* Shadow DOM host reset - seals inherited properties at the shadow boundary */
+    :host {
+        font-size: 14px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        line-height: 1.5;
+        color: var(--av-text);
+        letter-spacing: normal;
+        font-style: normal;
+        text-transform: none;
+        font-weight: normal;
+        word-spacing: normal;
+        text-indent: 0;
+        zoom: 1;
+        -webkit-text-size-adjust: 100%;
+    }
+
     /* Targeted CSS isolation - only reset problematic inherited properties */
     .age-modal,
     .age-modal * {
@@ -381,6 +397,21 @@ const AV_STYLES = `
         min-width: 0 !important;
         max-width: 115px !important;
         flex: 1 1 auto !important;
+    }
+
+    /* Custom action buttons row in the modal header */
+    .age-custom-buttons-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 15px;
+        padding: 12px;
+        background-color: var(--av-analysis-header);
+        border-radius: 6px;
+    }
+
+    .age-custom-buttons-row .age-modal-button {
+        flex: 0 1 auto !important;
     }
 
     .age-check-button {
@@ -421,10 +452,16 @@ const AV_STYLES = `
         min-width: 400px;
         min-height: 300px;
         max-width: 95vw;
-        max-height: 95vh;  /* <-- Increased to 95% */
+        max-height: 95vh;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.5);
         display: flex;
         flex-direction: column;
+        box-sizing: border-box !important;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+        font-size: 14px !important;
+        line-height: 1.5 !important;
+        zoom: 1 !important;
+        -webkit-text-size-adjust: 100% !important;
     }
 
     .age-modal-overlay {
@@ -485,6 +522,8 @@ const AV_STYLES = `
         overflow-y: auto;
         flex: 1;
         min-height: 0;
+        font-size: 14px;
+        line-height: 1.5;
     }
 
     .age-modal-content a {
@@ -513,14 +552,32 @@ const AV_STYLES = `
     }
 
     .age-modal-button {
-        padding: 8px 16px;
+        all: initial;
+        display: inline-block !important;
+        -webkit-appearance: none !important;
+        appearance: none !important;
+        box-sizing: border-box !important;
+        padding: 8px 16px !important;
+        margin: 0 !important;
         background-color: var(--av-primary);
-        color: white;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        font-weight: bold;
-        margin-right: 10px;
+        color: white !important;
+        border: none !important;
+        border-radius: 4px !important;
+        cursor: pointer !important;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+        font-size: 13px !important;
+        font-weight: bold !important;
+        line-height: 1.4 !important;
+        text-align: center !important;
+        vertical-align: middle !important;
+        white-space: normal !important;
+        word-wrap: break-word !important;
+        overflow-wrap: break-word !important;
+        text-decoration: none !important;
+        letter-spacing: normal !important;
+        text-transform: none !important;
+        flex-shrink: 1 !important;
+        min-width: 0 !important;
     }
 
     .age-modal-button:hover {
@@ -528,19 +585,19 @@ const AV_STYLES = `
     }
 
     .age-modal-button.secondary {
-        background-color: var(--av-border);
+        background-color: var(--av-border) !important;
     }
 
     .age-modal-button.secondary:hover {
-        background-color: #4a4a4b;
+        background-color: #4a4a4b !important;
     }
 
     .age-modal-button.danger {
-        background-color: var(--av-danger);
+        background-color: var(--av-danger) !important;
     }
 
     .age-modal-button.danger:hover {
-        background-color: #c20022;
+        background-color: #c20022 !important;
     }
 
     .age-summary {
@@ -554,6 +611,45 @@ const AV_STYLES = `
     .age-summary-title {
         margin-bottom: 4px;
         color: var(--av-text);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .age-summary-title:hover {
+        opacity: 0.85;
+    }
+
+    .age-summary-toggle {
+        color: var(--av-text-muted);
+        font-size: 12px;
+        margin-left: 10px;
+        flex-shrink: 0;
+    }
+
+    .age-summary-details {
+        overflow: hidden;
+        transition: max-height 0.3s ease, opacity 0.3s ease;
+        max-height: 500px;
+        opacity: 1;
+    }
+
+    .age-summary-details.collapsed {
+        max-height: 0;
+        opacity: 0;
+    }
+
+    .age-chips-columns {
+        display: flex;
+        gap: 16px;
+        margin-top: 10px;
+    }
+
+    .age-chips-column {
+        flex: 1;
+        min-width: 0;
     }
 
     .age-filter-chips {
@@ -799,11 +895,14 @@ const AV_STYLES = `
 
     .age-modal-buttons {
         display: flex;
+        flex-wrap: wrap;
         justify-content: flex-start;
-        gap: 10px;
+        gap: 8px;
         padding: 15px 20px;
         border-top: 1px solid var(--av-border);
         flex-shrink: 0;
+        box-sizing: border-box !important;
+        align-items: center;
     }
 
     .age-link-text {
@@ -1581,6 +1680,9 @@ GM_addStyle(AV_STYLES);
 (function initShadowDOM() {
     const host = document.createElement('div');
     host.id = 'av-shadow-host';
+    // Inline styles on the host element override any page CSS that targets it,
+    // ensuring inherited properties inside the shadow tree are always correct.
+    host.style.cssText = 'font-size:14px !important; line-height:1.5 !important; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif !important; letter-spacing:normal !important; font-style:normal !important; text-transform:none !important; font-weight:normal !important; word-spacing:normal !important; zoom:1 !important; -webkit-text-size-adjust:100% !important;';
     document.body.appendChild(host);
     avShadowRoot = host.attachShadow({ mode: 'open' });
 
@@ -7775,7 +7877,7 @@ function showResultsModal(username, ageData) {
         let postedChipsHTML = '';
         if (postedAges.length > 0) {
             postedChipsHTML = `
-                <div style="margin-top: 10px;">
+                <div class="age-chips-column">
                     <strong>Posted Ages (in brackets):</strong>
                     <div class="age-filter-chips">
                         ${postedAges.map(age =>
@@ -7790,7 +7892,7 @@ function showResultsModal(username, ageData) {
         let possibleChipsHTML = '';
         if (possibleAges.length > 0) {
             possibleChipsHTML = `
-                <div style="margin-top: 10px;">
+                <div class="age-chips-column">
                     <strong>Possible Ages (not in brackets):</strong>
                     <div class="age-filter-chips">
                         ${possibleAges.map(age =>
@@ -7852,19 +7954,26 @@ function showResultsModal(username, ageData) {
         }
 
         summaryHTML = `<div class="age-summary">
-            <div class="age-summary-title"><b>Found Ages: ${postedRangeText}</b> (Total posts with age mentions: ${results.length})</div>
-            <p>Posted ages found: ${postedAges.length > 0 ? postedAges.join(', ') : 'None'}</p>
-            <p>Possible ages found: ${possibleAges.length > 0 ? possibleAges.join(', ') : 'None'}</p>
-            ${estimateHTML}
-            ${postedChipsHTML}
-            ${possibleChipsHTML}
-            ${ageData._pushshiftCount !== undefined || ageData._liveCount !== undefined ?
-                `<p style="color: var(--av-text-muted); font-size: 11px; margin-top: 6px;">
-                    Sources: ${ageData._pushshiftCount || 0} archived (PushShift)
-                    ${ageData._pushshiftError ? '<span style="color: var(--av-danger);" title="' + escapeHtml(ageData._pushshiftError) + '">⚠️</span>' : ''}
-                    + ${ageData._liveCount || 0} live (Reddit)
-                    | ${Object.keys(ageData._liveVersions || {}).length} overlapping
-                </p>` : ''}
+            <div class="age-summary-title" title="Click to collapse/expand details">
+                <span><b>Found Ages: ${postedRangeText}</b> (Total posts with age mentions: ${results.length})</span>
+                <span class="age-summary-toggle">▼ Hide</span>
+            </div>
+            <div class="age-summary-details">
+                <!--<p>Posted ages found: ${postedAges.length > 0 ? postedAges.join(', ') : 'None'}</p>-->
+                <!--<p>Possible ages found: ${possibleAges.length > 0 ? possibleAges.join(', ') : 'None'}</p>-->
+                ${estimateHTML}
+                ${ageData._pushshiftCount !== undefined || ageData._liveCount !== undefined ?
+                    `<p style="color: var(--av-text-muted); font-size: 11px; margin-top: 6px;">
+                        Sources: ${ageData._pushshiftCount || 0} archived (PushShift)
+                        ${ageData._pushshiftError ? '<span style="color: var(--av-danger);" title="' + escapeHtml(ageData._pushshiftError) + '">⚠️</span>' : ''}
+                        + ${ageData._liveCount || 0} live (Reddit)
+                        | ${Object.keys(ageData._liveVersions || {}).length} overlapping
+                    </p>` : ''}
+            </div>
+            <div class="age-chips-columns">
+                ${postedChipsHTML}
+                ${possibleChipsHTML}
+            </div>
         </div>`;
     }
 
@@ -8020,6 +8129,19 @@ function showResultsModal(username, ageData) {
 
     // Attach custom button handlers
     attachCustomButtonHandlers(modal);
+
+    // Collapsible age summary details
+    const summaryTitle = modal.querySelector('.age-summary-title');
+    if (summaryTitle) {
+        summaryTitle.addEventListener('click', () => {
+            const details = modal.querySelector('.age-summary-details');
+            const toggle = summaryTitle.querySelector('.age-summary-toggle');
+            if (details && toggle) {
+                details.classList.toggle('collapsed');
+                toggle.textContent = details.classList.contains('collapsed') ? '▶ Show' : '▼ Hide';
+            }
+        });
+    }
 
     const settingsBtn = modal.querySelector('.age-settings-gear');
     settingsBtn.onclick = (e) => {
@@ -11225,7 +11347,7 @@ function renderCustomButtons(username, ageData) {
     }).join('');
 
     return `
-        <div class="age-custom-buttons-row" style="display: flex; gap: 10px; margin-bottom: 15px; padding: 12px; background-color: --av-analysis-header; border-radius: 6px;">
+        <div class="age-custom-buttons-row">
             ${buttonsHTML}
         </div>
     `;
