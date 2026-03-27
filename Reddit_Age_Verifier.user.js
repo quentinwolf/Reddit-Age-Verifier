@@ -419,7 +419,6 @@ const AV_STYLES = `
         overflow-wrap: break-word !important;
         text-align: center !important;
         min-width: 0 !important;
-        max-width: 115px !important;
         flex: 1 1 auto !important;
     }
 
