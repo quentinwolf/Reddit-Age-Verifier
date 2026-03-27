@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.876
+// @version      1.877
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -57,6 +57,7 @@ let CACHE_EXPIRATION = 7 * 24 * 60 * 60 * 1000;      // 1 week for user results
 const TOKEN_EXPIRATION = 24 * 60 * 60 * 1000;          // 24 hours for API token
 const BUTTON_CACHE_EXPIRATION = 365 * 24 * 60 * 60 * 1000; // 1 year for button text
 const DELETED_CONTENT_CACHE_KEY = 'deletedContentCache';
+const MODAL_SAVED_SIZES_KEY = 'modalSavedSizes';        // Per-modal-type remembered sizes
 
 // PushShift API configuration
 const PUSHSHIFT_API_BASE = "https://api.pushshift.io";
@@ -348,6 +349,22 @@ let oauthFlowTimestamp = 0; // Track when we initiated OAuth flow
 const OAUTH_FLOW_TIMEOUT = 60 * 1000; // 60 seconds
 
 const usernotesCache = {}; // { subreddit: { ver, constants, users, timestamp } }
+
+// Per-modal-type size persistence
+let modalSavedSizes = JSON.parse(GM_getValue(MODAL_SAVED_SIZES_KEY, '{}'));
+
+function getModalSavedSize(modalType, defaultWidth, defaultHeight) {
+    const saved = modalSavedSizes[modalType];
+    if (saved && saved.width && saved.height) {
+        return { width: saved.width, height: saved.height };
+    }
+    return { width: defaultWidth, height: defaultHeight };
+}
+
+function saveModalSize(modalType, width, height) {
+    modalSavedSizes[modalType] = { width, height };
+    GM_setValue(MODAL_SAVED_SIZES_KEY, JSON.stringify(modalSavedSizes));
+}
 //const USERNOTES_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 const USERNOTES_CACHE_TTL = 20 * 1000; // 20 seconds for testint
 
@@ -2193,6 +2210,7 @@ function showTokenModal() {
 
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
+    modal.dataset.modalType = 'token';
 
     modal.innerHTML = `
         <div class="age-modal-header">
@@ -2224,6 +2242,7 @@ function showTokenModal() {
 
     avShadowRoot.appendChild(overlay);
     avShadowRoot.appendChild(modal);
+    clampModalSizeToViewport(modal);
 
     tokenModal = { modal, overlay };
 
@@ -2328,9 +2347,12 @@ function showIgnoredUsersModal() {
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
     modal.dataset.modalId = modalId;
-    modal.style.width = '500px';
+    modal.dataset.modalType = 'ignoredUsers';
+    const ignoredSize = getModalSavedSize('ignoredUsers', 500, null);
+    modal.style.width = ignoredSize.width + 'px';
     modal.style.maxWidth = '500px';
     modal.style.maxHeight = '900px';
+    if (ignoredSize.height) modal.style.height = ignoredSize.height + 'px';
     modal.style.zIndex = ++zIndexCounter;
 
     const ignoredList = userSettings.ignoredUsers;
@@ -2395,6 +2417,7 @@ function showIgnoredUsersModal() {
     `;
 
     avShadowRoot.appendChild(modal);
+    clampModalSizeToViewport(modal);
 
     makeDraggable(modal);
     makeResizable(modal);
@@ -2538,9 +2561,12 @@ function showTrackedSubredditsModal() {
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
     modal.dataset.modalId = modalId;
-    modal.style.width = '500px';
+    modal.dataset.modalType = 'trackedSubreddits';
+    const trackedSize = getModalSavedSize('trackedSubreddits', 500, null);
+    modal.style.width = trackedSize.width + 'px';
     modal.style.maxWidth = '500px';
     modal.style.maxHeight = '900px';
+    if (trackedSize.height) modal.style.height = trackedSize.height + 'px';
     modal.style.zIndex = ++zIndexCounter;
 
     const trackedSubs = userSettings.trackedSubreddits || [];
@@ -2590,6 +2616,7 @@ function showTrackedSubredditsModal() {
     `;
 
     avShadowRoot.appendChild(modal);
+    clampModalSizeToViewport(modal);
 
     makeDraggable(modal);
     makeResizable(modal);
@@ -2726,9 +2753,11 @@ function showSettingsModal() {
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
     modal.dataset.modalId = modalId;
+    modal.dataset.modalType = 'settings';
+    const settingsSize = getModalSavedSize('settings', 580, null);
     modal.style.minWidth = '580px';
-    modal.style.width = '580px';
-    modal.style.height = '80vh';
+    modal.style.width = settingsSize.width + 'px';
+    modal.style.height = settingsSize.height ? settingsSize.height + 'px' : '80vh';
     modal.style.zIndex = ++zIndexCounter;
 
     let scriptVersion = getScriptVersion();
@@ -3278,6 +3307,7 @@ function showSettingsModal() {
     `;
 
     avShadowRoot.appendChild(modal);
+    clampModalSizeToViewport(modal);
 
     makeDraggable(modal);
     makeResizable(modal);
@@ -6503,8 +6533,10 @@ async function showFrequencyModal(username) {
     modal.className = 'age-modal resizable';
     modal.dataset.modalId = modalId;
     modal.dataset.username = username;
-    modal.style.width = '900px';
-    modal.style.height = '90vh';
+    modal.dataset.modalType = 'frequency';
+    const freqSize = getModalSavedSize('frequency', 900, null);
+    modal.style.width = freqSize.width + 'px';
+    modal.style.height = freqSize.height ? freqSize.height + 'px' : '90vh';
     modal.style.zIndex = ++zIndexCounter;
 
     modal.innerHTML = `
@@ -6524,6 +6556,7 @@ async function showFrequencyModal(username) {
     `;
 
     avShadowRoot.appendChild(modal);
+    clampModalSizeToViewport(modal);
 
     makeDraggable(modal);
     makeResizable(modal);
@@ -6717,8 +6750,10 @@ function showSubredditFilteredModal(username, subreddit, allItems, kind, parentM
     modal.dataset.subreddit = subreddit;
     modal.dataset.kind = kind;
     modal.dataset.parentModalId = parentModalId; // Link to parent frequency modal
-    modal.style.width = '800px';
-    modal.style.height = '80vh';
+    modal.dataset.modalType = 'subredditFiltered';
+    const subFilterSize = getModalSavedSize('subredditFiltered', 800, null);
+    modal.style.width = subFilterSize.width + 'px';
+    modal.style.height = subFilterSize.height ? subFilterSize.height + 'px' : '80vh';
     modal.style.zIndex = ++zIndexCounter;
 
     // Sort newest first by default
@@ -6747,6 +6782,7 @@ function showSubredditFilteredModal(username, subreddit, allItems, kind, parentM
     `;
 
     avShadowRoot.appendChild(modal);
+    clampModalSizeToViewport(modal);
 
     makeDraggable(modal);
     makeResizable(modal);
@@ -7396,6 +7432,12 @@ function makeResizable(modal) {
         isResizing = false;
         document.removeEventListener('mousemove', onResize);
         document.removeEventListener('mouseup', stopResize);
+
+        // Persist the new size for this modal type
+        const modalType = modal.dataset.modalType;
+        if (modalType) {
+            saveModalSize(modalType, modal.offsetWidth, modal.offsetHeight);
+        }
     }
 }
 
@@ -7626,8 +7668,10 @@ function showManualSearchModal(options = {}) {
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
     modal.dataset.modalId = modalId;
-    modal.style.width = '700px';
-    modal.style.height = '600px';
+    modal.dataset.modalType = 'manualSearch';
+    const manualSize = getModalSavedSize('manualSearch', 700, 600);
+    modal.style.width = manualSize.width + 'px';
+    modal.style.height = manualSize.height + 'px';
     modal.style.zIndex = ++zIndexCounter;
 
     modal.innerHTML = `
@@ -7713,6 +7757,7 @@ function showManualSearchModal(options = {}) {
     `;
 
     avShadowRoot.appendChild(modal);
+    clampModalSizeToViewport(modal);
 
     makeDraggable(modal);
     makeResizable(modal);
@@ -7797,11 +7842,11 @@ function showManualSearchResults(searchData) {
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
     modal.dataset.modalId = modalId;
-    modal.style.width = `${userSettings.modalWidth}px`;
-    modal.style.height = `${userSettings.modalHeight}px`;
+    modal.dataset.modalType = 'manualResults';
+    const manualResultsSize = getModalSavedSize('manualResults', userSettings.modalWidth, userSettings.modalHeight);
+    modal.style.width = `${manualResultsSize.width}px`;
+    modal.style.height = `${manualResultsSize.height}px`;
     modal.style.zIndex = ++zIndexCounter;
-
-    const kindLabel = params.kind === 'comment' ? 'Comments' : 'Posts';
 
     // Parse search terms for highlighting
     const searchTerms = params.highlight && params.query
@@ -7974,6 +8019,7 @@ function showManualSearchResults(searchData) {
     `;
 
     avShadowRoot.appendChild(modal);
+    clampModalSizeToViewport(modal);
 
     makeDraggable(modal);
     makeResizable(modal);
@@ -8059,9 +8105,11 @@ function showResultsModal(username, ageData) {
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
     modal.dataset.modalId = modalId;
+    modal.dataset.modalType = 'results';
+    const savedSize = getModalSavedSize('results', userSettings.modalWidth, userSettings.modalHeight);
     modal.style.minWidth = '600px';
-    modal.style.width = `${userSettings.modalWidth}px`;
-    modal.style.height = `${userSettings.modalHeight}px`;
+    modal.style.width = `${savedSize.width}px`;
+    modal.style.height = `${savedSize.height}px`;
     modal.style.zIndex = ++zIndexCounter;
 
     const postedAges = ageData.postedAges;
@@ -8307,6 +8355,7 @@ function showResultsModal(username, ageData) {
     // Don't append overlay - we don't want darkening with multiple modals
     // document.body.appendChild(overlay);
     avShadowRoot.appendChild(modal);
+    clampModalSizeToViewport(modal);
 
     // Make modal draggable
     makeDraggable(modal);
@@ -8715,6 +8764,7 @@ function showErrorModal(username, error) {
     // Don't append overlay
     // document.body.appendChild(overlay);
     avShadowRoot.appendChild(modal);
+    clampModalSizeToViewport(modal);
 
     makeDraggable(modal);
     makeResizable(modal);
@@ -8984,9 +9034,11 @@ function showDeepAnalysisModal(username, ageData, analysis) {
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
     modal.dataset.modalId = modalId;
+    modal.dataset.modalType = 'deepAnalysis';
+    const deepSize = getModalSavedSize('deepAnalysis', 900, null);
     modal.style.minWidth = '700px';
-    modal.style.width = '900px';
-    modal.style.height = '85vh';
+    modal.style.width = deepSize.width + 'px';
+    modal.style.height = deepSize.height ? deepSize.height + 'px' : '85vh';
     modal.style.zIndex = ++zIndexCounter;
 
     // Store analysis data for pagination
@@ -9045,6 +9097,7 @@ function showDeepAnalysisModal(username, ageData, analysis) {
     `;
 
     avShadowRoot.appendChild(modal);
+    clampModalSizeToViewport(modal);
 
     makeDraggable(modal);
     makeResizable(modal);
@@ -11629,6 +11682,7 @@ function showLoadingModal(username) {
     // Don't append overlay
     // document.body.appendChild(overlay);
     avShadowRoot.appendChild(modal);
+    clampModalSizeToViewport(modal);
 
     makeDraggable(modal);
     makeResizable(modal);
@@ -12692,8 +12746,10 @@ async function showUsernotesModal(username, subreddit, threadUrl = null) {
     const modal = document.createElement('div');
     modal.className = 'age-modal resizable';
     modal.dataset.modalId = modalId;
-    modal.style.width = '680px';
-    modal.style.height = '520px';
+    modal.dataset.modalType = 'usernotes';
+    const usernotesSize = getModalSavedSize('usernotes', 680, 520);
+    modal.style.width = usernotesSize.width + 'px';
+    modal.style.height = usernotesSize.height + 'px';
     modal.style.zIndex = ++zIndexCounter;
 
     modal.innerHTML = `
@@ -12729,6 +12785,7 @@ async function showUsernotesModal(username, subreddit, threadUrl = null) {
     `;
 
     avShadowRoot.appendChild(modal);
+    clampModalSizeToViewport(modal);
     makeDraggable(modal);
     makeResizable(modal);
 
