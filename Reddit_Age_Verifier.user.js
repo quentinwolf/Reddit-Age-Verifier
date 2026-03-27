@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.875
+// @version      1.876
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -458,8 +458,6 @@ const AV_STYLES = `
         z-index: 10000;
         min-width: 400px;
         min-height: 300px;
-        max-width: 95vw;
-        max-height: 95vh;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.5);
         display: flex;
         flex-direction: column;
@@ -3135,6 +3133,9 @@ function showSettingsModal() {
                 <div class="age-settings-row">
                     <label class="age-settings-label">Modal Zoom Level</label>
                     <select class="age-settings-input" id="setting-modal-zoom" style="width: 120px;">
+                        <option value="0.6" ${userSettings.modalZoom === 0.6 ? 'selected' : ''}>60%</option>
+                        <option value="0.7" ${userSettings.modalZoom === 0.7 ? 'selected' : ''}>70%</option>
+                        <option value="0.75" ${userSettings.modalZoom === 0.75 ? 'selected' : ''}>75%</option>
                         <option value="0.8" ${userSettings.modalZoom === 0.8 ? 'selected' : ''}>80%</option>
                         <option value="0.85" ${userSettings.modalZoom === 0.85 ? 'selected' : ''}>85%</option>
                         <option value="0.9" ${userSettings.modalZoom === 0.9 ? 'selected' : ''}>90%</option>
