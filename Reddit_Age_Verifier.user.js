@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.877
+// @version      1.878
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -7301,9 +7301,31 @@ function clampModalSizeToViewport(modal) {
         modal.style.height = maxH + 'px';
     }
 
-    // Also ensure position is clamped after resizing
+    // Also ensure position is clamped after resizing — nudge fully into viewport
     normalizeModalPosition(modal);
-    clampModalToViewport(modal);
+
+    const rect = modal.getBoundingClientRect();
+    let left = parseFloat(modal.style.left);
+    let top = parseFloat(modal.style.top);
+    if (isNaN(left) || isNaN(top)) return;
+
+    // Push the modal so its right/bottom edges don't exceed the viewport
+    if (rect.right > vw) {
+        left -= (rect.right - vw) / zoom;
+    }
+    if (rect.bottom > vh) {
+        top -= (rect.bottom - vh) / zoom;
+    }
+    // Then ensure left/top don't go negative
+    if (rect.left < 0 || left < 0) {
+        left = Math.max(0, left + (0 - rect.left) / zoom);
+    }
+    if (rect.top < 0 || top < 0) {
+        top = Math.max(0, top);
+    }
+
+    modal.style.left = left + 'px';
+    modal.style.top = top + 'px';
 }
 
 // Clamp all open modals to fit within the viewport
@@ -7314,6 +7336,13 @@ function clampAllModalsToViewport() {
         }
     });
 }
+
+// Re-clamp modals when the browser window is resized
+let _resizeClampTimer = null;
+window.addEventListener('resize', () => {
+    clearTimeout(_resizeClampTimer);
+    _resizeClampTimer = setTimeout(clampAllModalsToViewport, 100);
+});
 
 function makeDraggable(modal) {
     const dragHandle = modal.querySelector('.age-modal-title-row') || modal.querySelector('.age-modal-header');
