@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.878
+// @version      1.879
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -3229,12 +3229,12 @@ function showSettingsModal() {
                                     <div style="display: flex; align-items: center; gap: 4px;">
                                         <input type="checkbox" class="age-settings-checkbox custom-btn-enabled"
                                                ${btn.enabled ? 'checked' : ''} id="custombtn-enabled-${idx}">
-                                        <label class="age-settings-label" for="custombtn-enabled-${idx}" style="flex: 0; margin: 0; font-size: 12px;">Enabled</label>
+                                        <label class="age-settings-label" for="custombtn-enabled-${idx}" style="flex: none; margin: 0; font-size: 12px;">Enabled</label>
                                     </div>
                                     <div style="display: flex; align-items: center; gap: 4px;">
                                         <input type="checkbox" class="age-settings-checkbox custom-btn-context-menu"
                                                ${btn.showInContextMenu ? 'checked' : ''} id="custombtn-context-${idx}">
-                                        <label class="age-settings-label" for="custombtn-context-${idx}" style="flex: 0; margin: 0; font-size: 12px;">Context Menu</label>
+                                        <label class="age-settings-label" for="custombtn-context-${idx}" style="flex: none; margin: 0; font-size: 12px;">Context Menu</label>
                                     </div>
                                 </div>
                                 <button class="age-modal-button danger" style="margin: 0; padding: 4px 12px; font-size: 11px;"
@@ -3537,12 +3537,12 @@ function showSettingsModal() {
                             <div style="display: flex; align-items: center; gap: 4px;">
                                 <input type="checkbox" class="age-settings-checkbox custom-btn-enabled"
                                        checked id="custombtn-enabled-${newIndex}">
-                                <label class="age-settings-label" for="custombtn-enabled-${newIndex}" style="flex: 0; margin: 0; font-size: 12px;">Enabled</label>
+                                <label class="age-settings-label" for="custombtn-enabled-${newIndex}" style="flex: none; margin: 0; font-size: 12px;">Enabled</label>
                             </div>
                             <div style="display: flex; align-items: center; gap: 4px;">
                                 <input type="checkbox" class="age-settings-checkbox custom-btn-context-menu"
                                        id="custombtn-context-${newIndex}">
-                                <label class="age-settings-label" for="custombtn-context-${newIndex}" style="flex: 0; margin: 0; font-size: 12px;">In Menu</label>
+                                <label class="age-settings-label" for="custombtn-context-${newIndex}" style="flex: none; margin: 0; font-size: 12px;">In Menu</label>
                             </div>
                         </div>
                         <button class="age-modal-button danger" style="margin: 0; padding: 4px 12px; font-size: 11px;"
