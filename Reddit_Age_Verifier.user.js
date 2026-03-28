@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.883
+// @version      1.884
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -9152,8 +9152,9 @@ function showDeepAnalysisModal(username, ageData, analysis) {
     modal.dataset.username = username;
 
     // Filter state
-    let daFilters = { posted: true, possible: true };
-    let currentAnalysis = analysis;
+    let daFilters = { posted: true, possible: false };
+    const filteredInitialData = filterAgeDataForDeepAnalysis(ageData, daFilters.posted, daFilters.possible);
+    let currentAnalysis = performDeepAnalysis(filteredInitialData, username);
 
     function buildSectionsHTML(a) {
         return buildOverviewSection(a) +
@@ -9182,17 +9183,17 @@ function showDeepAnalysisModal(username, ageData, analysis) {
             <div class="da-filter-bar" style="display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--av-border);flex-shrink:0;margin-bottom:2px;">
                 <span style="font-size:12px;color:var(--av-text-muted);">Show:</span>
                 <button class="da-filter-btn active" data-filter="posted" style="padding:3px 11px;border-radius:12px;border:1px solid var(--av-success);background:var(--av-success);color:#fff;font-size:12px;cursor:pointer;">✓ Posted Ages</button>
-                <button class="da-filter-btn active" data-filter="possible" style="padding:3px 11px;border-radius:12px;border:1px solid var(--av-text-muted);background:var(--av-text-muted);color:#fff;font-size:12px;cursor:pointer;">~ Possible Ages</button>
+                <button class="da-filter-btn" data-filter="possible" style="padding:3px 11px;border-radius:12px;border:1px solid var(--av-text-muted);background:transparent;color:var(--av-text-muted);font-size:12px;cursor:pointer;opacity:0.65;">~ Possible Ages</button>
             </div>
             <div class="da-sections-wrapper">
-                ${buildSectionsHTML(analysis)}
+                ${buildSectionsHTML(currentAnalysis)} <!-- Sections will be re-rendered on filter toggle, changed from 'analysis' to 'currentAnalysis' -->
             </div>
 
             <div class="fetch-more-container">
                 <div class="fetch-more-status">
-                    Currently showing ${analysis.totalPosts} posts with age mentions.
-                    ${analysis.timeline.length > 0 ?
-                        `Oldest post: ${new Date(analysis.timeline[0].timestamp * 1000).toLocaleDateString()}` : ''}
+                    Currently showing ${currentAnalysis.totalPosts} posts with age mentions.
+                    ${currentAnalysis.timeline.length > 0 ?
+                        `Oldest post: ${new Date(currentAnalysis.timeline[0].timestamp * 1000).toLocaleDateString()}` : ''} <!-- changed from 'analysis' to 'currentAnalysis' -->
                 </div>
             </div>
         </div>
