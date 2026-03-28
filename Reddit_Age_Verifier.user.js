@@ -25,7 +25,7 @@
 // @exclude      https://mod.reddit.com/chat*
 // @downloadURL  https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
 // @updateURL    https://github.com/quentinwolf/Reddit-Age-Verifier/raw/refs/heads/main/Reddit_Age_Verifier.user.js
-// @version      1.880
+// @version      1.883
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -1308,6 +1308,28 @@ const AV_STYLES = `
 
     .timeline-entry.first-post {
         border-left-color: var(--av-primary);
+    }
+
+    .timeline-entry.multi-age {
+        border-left-color: #a855f7;
+        background-color: rgba(168, 85, 247, 0.08);
+    }
+
+    .multi-age-label {
+        min-width: 160px;
+    }
+
+    .multi-age-badge {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 1px 6px;
+        background: rgba(168, 85, 247, 0.2);
+        color: #a855f7;
+        border-radius: 3px;
+        font-size: 10px;
+        font-weight: normal;
+        font-style: normal;
+        vertical-align: middle;
     }
 
     .timeline-date {
@@ -4311,20 +4333,44 @@ function processResults(results, username) {
 
 function estimateCurrentAge(ageData) {
     // Only use posted ages (in brackets) for estimation
+    // Multi-age posts (e.g. "(32F) and my husband (35M)") are ambiguous — we can't tell which
+    // age belongs to the account holder, so we exclude them by default.
+    // Exception: if exactly one of the ages clearly matches the established pattern, include it.
+
     const dataPoints = [];
+    const multiAgeResults = [];
 
     ageData.results.forEach(result => {
         if (result.postedAges && result.postedAges.length > 0) {
-            // Use stored timestamp directly
             const timestamp = result.timestamp;
-            if (!timestamp) {
-                return; // Skip if no timestamp
+            if (!timestamp) return;
+
+            if (result.postedAges.length === 1) {
+                // Unambiguous single age — always include
+                dataPoints.push({ timestamp, age: result.postedAges[0] });
+            } else {
+                // Multi-age post — defer for exception check
+                multiAgeResults.push({ timestamp, ages: result.postedAges });
             }
-            result.postedAges.forEach(age => {
-                dataPoints.push({ timestamp, age });
-            });
         }
     });
+
+    // Exception: if we have enough single-age data to establish a pattern, check whether
+    // exactly one age from a multi-age post matches that pattern (the other is the partner's age).
+    if (dataPoints.length >= 3 && multiAgeResults.length > 0) {
+        const sortedAges = dataPoints.map(p => p.age).sort((a, b) => a - b);
+        const medianAge = sortedAges[Math.floor(sortedAges.length / 2)];
+
+        multiAgeResults.forEach(({ timestamp, ages }) => {
+            // Count how many of this post's ages fall within ±3 of the established median
+            const matches = ages.filter(a => Math.abs(a - medianAge) <= 3);
+            if (matches.length === 1) {
+                // Exactly one age fits the pattern — safe to include as evidence
+                dataPoints.push({ timestamp, age: matches[0] });
+            }
+            // If 0 or 2+ match, the result is too ambiguous — skip entirely
+        });
+    }
 
     if (dataPoints.length === 0) {
         return null;
@@ -4631,9 +4677,11 @@ function performDeepAnalysis(ageData, username) {
 
     // Build timeline from results (posted + filtered potential ages)
     const timelinePoints = [];
-    ageData.results.forEach(result => {
+    ageData.results.forEach((result, resultIdx) => {
         // Add confirmed posted ages
         if (result.postedAges && result.postedAges.length > 0) {
+            // Tag multi-age posts so display/algorithm layers can group them
+            const isMultiAge = result.postedAges.length > 1;
             result.postedAges.forEach(age => {
                 timelinePoints.push({
                     timestamp: result.timestamp,
@@ -4642,7 +4690,9 @@ function performDeepAnalysis(ageData, username) {
                     isPotential: false,
                     subreddit: result.subreddit.toLowerCase(),
                     permalink: result.permalink,
-                    _source: result._source || null
+                    _source: result._source || null,
+                    samePostGroup: isMultiAge ? resultIdx : null,
+                    samePostAllAges: isMultiAge ? [...result.postedAges] : null
                 });
             });
         }
@@ -4657,7 +4707,9 @@ function performDeepAnalysis(ageData, username) {
                         isPotential: true,
                         subreddit: result.subreddit.toLowerCase(),
                         permalink: result.permalink,
-                        _source: result._source || null
+                        _source: result._source || null,
+                        samePostGroup: null,
+                        samePostAllAges: null
                     });
                 }
             });
@@ -4716,6 +4768,12 @@ function detectBackwardsAging(timelinePoints) {
     for (let i = 1; i < timelinePoints.length; i++) {
         const prev = timelinePoints[i - 1];
         const curr = timelinePoints[i];
+
+        // Skip any transition involving a multi-age post — ages from multi-person posts
+        // cannot be reliably attributed to the account holder alone
+        if (curr.samePostGroup !== null || prev.samePostGroup !== null) {
+            continue;
+        }
 
         // If current age is younger than previous, that's backwards aging
         if (curr.age < prev.age) {
@@ -4958,8 +5016,9 @@ function detectRecentAgeChange(timelinePoints) {
     const thirtyDaysAgo = now - (30 * 24 * 60 * 60);
     const ninetyDaysAgo = now - (90 * 24 * 60 * 60);
 
-    // Get recent posts
-    const recentPosts = timelinePoints.filter(p => p.timestamp > ninetyDaysAgo);
+    // Get recent posts, excluding multi-age posts (ages from multi-person posts
+    // cannot be reliably attributed to the account holder alone)
+    const recentPosts = timelinePoints.filter(p => p.timestamp > ninetyDaysAgo && p.samePostGroup === null);
     if (recentPosts.length < 2) return null;
 
     // Find if there was an age change in recent posts
@@ -5109,6 +5168,26 @@ function detectCouplesAccountEnhanced(timelinePoints) {
     } else if (minClusterSize >= 2 && totalPoints >= 5) {
         couplesScore += 10;
         detectionReasons.push(`adequate data (${totalPoints} points)`);
+    }
+
+    // Signal 6: Same-post multi-age entries — the strongest explicit indicator.
+    // A single post containing two distinct bracketed ages (e.g. "(32F) and my husband (35M)")
+    // directly states two different people's ages in one post. This is far stronger evidence
+    // than merely alternating ages across separate posts.
+    const multiAgeGroupIds = new Set(
+        timelinePoints
+            .filter(p => p.samePostGroup !== null)
+            .map(p => p.samePostGroup)
+    );
+    if (multiAgeGroupIds.size >= 3) {
+        couplesScore += 40;
+        detectionReasons.push(`${multiAgeGroupIds.size} posts explicitly listing multiple ages`);
+    } else if (multiAgeGroupIds.size >= 2) {
+        couplesScore += 30;
+        detectionReasons.push(`${multiAgeGroupIds.size} posts explicitly listing multiple ages`);
+    } else if (multiAgeGroupIds.size === 1) {
+        couplesScore += 20;
+        detectionReasons.push('1 post explicitly listing multiple ages');
     }
 
     // Determine if couples account based on score
@@ -9960,19 +10039,21 @@ function buildTimelineSection(analysis) {
 }
 
 function buildTimelineFull(analysis, trackedSubs) {
+    const timeline = collapseMultiAgeGroups(analysis.timeline);
     const timelineEntries = [];
     let prevAge = null;
 
-    analysis.timeline.forEach((point, idx) => {
+    timeline.forEach((point, idx) => {
         const entry = createTimelineEntry(point, idx, prevAge, trackedSubs);
         timelineEntries.push(entry.html);
-        prevAge = point.age;
+        // Multi-age entries don't establish a clean "current age" for the next comparison
+        if (!point.isMultiAge) prevAge = point.age;
     });
 
     return `
         <div class="deep-analysis-section">
             <div class="deep-analysis-header">
-                <span class="deep-analysis-title">📅 Age Timeline (${analysis.timeline.length} entries)</span>
+                <span class="deep-analysis-title">📅 Age Timeline (${timeline.length} entries)</span>
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <button class="deep-analysis-copy" data-section="timeline" title="Copy as Markdown">📋</button>
                     <span class="deep-analysis-toggle">▼ Hide</span>
@@ -9986,7 +10067,7 @@ function buildTimelineFull(analysis, trackedSubs) {
 }
 
 function buildTimelineCompressed(analysis, trackedSubs) {
-    const timeline = analysis.timeline;
+    const timeline = collapseMultiAgeGroups(analysis.timeline);
     const maxVisibleRows = 150;
     const contextPosts = userSettings.timelineContextPosts || 3;
     const shownIndices = new Set(); // Track which indices we've already displayed
@@ -10002,10 +10083,14 @@ function buildTimelineCompressed(analysis, trackedSubs) {
         }
 
         const point = timeline[i];
-        const prevAge = i > 0 ? timeline[i - 1].age : null;
+        // Walk back to find the last non-multi-age entry's age for comparison
+        let prevAge = null;
+        for (let k = i - 1; k >= 0; k--) {
+            if (!timeline[k].isMultiAge) { prevAge = timeline[k].age; break; }
+        }
 
-        // Detect age change
-        const isAgeChange = prevAge !== null && point.age !== prevAge;
+        // Detect age change; multi-age entries always show with context (they're noteworthy)
+        const isAgeChange = prevAge !== null && (point.isMultiAge || point.age !== prevAge);
         const isFirstPost = i === 0;
 
         if (isFirstPost || isAgeChange) {
@@ -10046,7 +10131,8 @@ function buildTimelineCompressed(analysis, trackedSubs) {
             const stableAgeStart = i;
             let stableAgeEnd = i;
 
-            while (stableAgeEnd < timeline.length && timeline[stableAgeEnd].age === point.age) {
+            // Multi-age entries always break out of stable periods — they need individual display
+            while (stableAgeEnd < timeline.length && !timeline[stableAgeEnd].isMultiAge && timeline[stableAgeEnd].age === point.age) {
                 stableAgeEnd++;
             }
 
@@ -10160,7 +10246,7 @@ function buildTimelineCompressed(analysis, trackedSubs) {
     return `
         <div class="deep-analysis-section">
             <div class="deep-analysis-header">
-                <span class="deep-analysis-title">📅 Age Timeline (${analysis.timeline.length} entries)</span>
+                <span class="deep-analysis-title">📅 Age Timeline (${timeline.length} entries)</span>
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <button class="deep-analysis-copy" data-section="timeline" title="Copy as Markdown">📋</button>
                     <span class="deep-analysis-toggle">▼ Hide</span>
@@ -10174,7 +10260,65 @@ function buildTimelineCompressed(analysis, trackedSubs) {
     `;
 }
 
+// Collapses same-post multi-age points into single representative entries for display.
+// The raw timeline keeps all individual points for algorithm use; this view is display-only.
+function collapseMultiAgeGroups(timeline) {
+    const collapsed = [];
+    const seenGroups = new Set();
+
+    for (let i = 0; i < timeline.length; i++) {
+        const point = timeline[i];
+
+        if (point.samePostGroup !== null) {
+            if (seenGroups.has(point.samePostGroup)) continue;
+            seenGroups.add(point.samePostGroup);
+
+            // Gather all ages in this group (may already be on samePostAllAges, but collect fresh)
+            const groupAges = timeline
+                .filter(p => p.samePostGroup === point.samePostGroup)
+                .map(p => p.age);
+            const distinctAges = [...new Set(groupAges)].sort((a, b) => a - b);
+
+            collapsed.push({
+                ...point,
+                isMultiAge: true,
+                multiAgeAges: distinctAges,
+                // Use the minimum age as the numeric representative for compression comparisons
+                age: distinctAges[0]
+            });
+        } else {
+            collapsed.push(point);
+        }
+    }
+
+    return collapsed;
+}
+
 function createTimelineEntry(point, idx, prevAge, trackedSubs) {
+    // Multi-age grouped entry (same-post, multiple bracketed ages)
+    if (point.isMultiAge && point.multiAgeAges && point.multiAgeAges.length > 1) {
+        const agesLabel = point.multiAgeAges.join(' & ');
+        const isTracked = trackedSubs.includes(point.subreddit.toLowerCase());
+        const trackedStyle = isTracked ? 'font-weight: bold;' : '';
+        const dateStr = new Date(point.timestamp * 1000).toLocaleDateString('en-US', {
+            year: 'numeric', month: 'short', day: 'numeric'
+        });
+
+        const html = `
+            <div class="timeline-entry multi-age">
+                <span class="timeline-date">${dateStr}</span>
+                <span class="timeline-age multi-age-label">
+                    Ages: <a href="${point.permalink}" target="_blank" style="color: inherit; text-decoration: underline;">${agesLabel}</a>
+                    <span class="multi-age-badge">multi-person post</span>
+                </span>
+                <span class="timeline-change">👥</span>
+                <span class="timeline-subreddit" style="${trackedStyle}"><a href="https://old.reddit.com/r/${point.subreddit}" target="_blank" style="color: var(--av-link);">r/${point.subreddit}</a></span>
+                ${point._source === 'live' || point._source === 'both' ? '<span class="timeline-live-badge">Live</span>' : ''}
+            </div>
+        `;
+        return { html, isTracked, isMultiAge: true };
+    }
+
     let entryClass = 'age-same';
     let changeText = '';
 
